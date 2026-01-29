@@ -30,8 +30,13 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files (sensitive configuration)
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # vercel
 .vercel
@@ -39,3 +44,40 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# prisma
+/src/generated/prisma
+
+# database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# temp directories
+/easyman-temp/
+/tmp/
+*.tmp
+*.temp
+
+# uploaded files (user content)
+/public/uploads/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# logs
+logs/
+*.log
+
+# secrets and credentials
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
