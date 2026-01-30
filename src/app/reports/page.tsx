@@ -31,6 +31,7 @@ export default function ReportsPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<'all' | 'Completed' | 'In Progress' | 'Pending' | 'Overdue'>('all');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -63,12 +64,23 @@ export default function ReportsPage() {
   const overdueTasks = tasks.filter(isOverdue).length;
 
   const stats = [
-    { label: 'Total Tasks', value: totalTasks, color: 'text-foreground', border: 'border-primary ring-1 ring-primary' },
-    { label: 'Completed', value: completedTasks, color: 'text-green-600', border: 'border-border' },
-    { label: 'In Progress', value: inProgressTasks, color: 'text-yellow-600', border: 'border-border' },
-    { label: 'Pending', value: pendingTasks, color: 'text-muted-foreground', border: 'border-border' },
-    { label: 'Overdue', value: overdueTasks, color: 'text-red-600', border: 'border-border' },
+    { label: 'Total Tasks', value: totalTasks, filter: 'all' as const, color: 'text-foreground', border: 'border-primary ring-1 ring-primary' },
+    { label: 'Completed', value: completedTasks, filter: 'Completed' as const, color: 'text-green-600', border: 'border-border' },
+    { label: 'In Progress', value: inProgressTasks, filter: 'In Progress' as const, color: 'text-yellow-600', border: 'border-border' },
+    { label: 'Pending', value: pendingTasks, filter: 'Pending' as const, color: 'text-muted-foreground', border: 'border-border' },
+    { label: 'Overdue', value: overdueTasks, filter: 'Overdue' as const, color: 'text-red-600', border: 'border-border' },
   ];
+
+  const filteredTasks = tasks.filter(task => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'Overdue') return isOverdue(task);
+    // For specific statuses, exclude overdue items from them (except Completed) so they don't double dip visual logic if needed,
+    // though usually "Pending" that is overdue is effectively "Overdue". 
+    // Let's mirror the stats logic:
+    if (activeFilter === 'Completed') return task.status === 'Completed';
+    // For In Progress and Pending, we want them only if NOT overdue (since Overdue is a separate filter)
+    return task.status === activeFilter && !isOverdue(task);
+  });
 
   // Group by Member
   const memberStats = users.map(user => {
@@ -101,7 +113,14 @@ export default function ReportsPage() {
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {stats.map((stat, idx) => (
-          <div key={idx} className={cn("bg-card p-6 rounded-xl border flex flex-col gap-3 shadow-sm", stat.border)}>
+          <div
+            key={idx}
+            onClick={() => setActiveFilter(stat.filter)}
+            className={cn(
+              "bg-card p-6 rounded-xl border flex flex-col gap-3 shadow-sm cursor-pointer transition-all hover:shadow-md",
+              activeFilter === stat.filter ? "ring-2 ring-primary border-primary bg-primary/5" : stat.border
+            )}
+          >
             <span className="text-xs font-semibold text-muted-foreground">{stat.label}</span>
             <span className={cn("text-3xl font-bold font-mono", stat.color)}>{stat.value}</span>
           </div>
@@ -110,8 +129,11 @@ export default function ReportsPage() {
 
       {/* Task List Table */}
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
-        <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-sm font-bold text-foreground">Recent Task Breakdown</h2>
+        <div className="px-5 py-4 border-b border-border flex justify-between items-center">
+          <h2 className="text-sm font-bold text-foreground">
+            Recent Task Breakdown {activeFilter !== 'all' && <span className="font-normal text-muted-foreground ml-1">- {activeFilter}</span>}
+          </h2>
+          <span className="text-xs text-muted-foreground">Showing {filteredTasks.length} tasks</span>
         </div>
         {/* Table Header */}
         <div className="hidden md:flex items-center px-5 py-3 bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -124,10 +146,16 @@ export default function ReportsPage() {
 
         {/* Table Rows */}
         <div className="divide-y divide-border overflow-y-auto max-h-[400px]">
-          {tasks.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">No task data available.</div>
-          ) : tasks.map((task) => (
-            <div key={task.id} className="flex flex-col md:flex-row md:items-center px-5 py-4 hover:bg-muted/30 transition-colors gap-3 md:gap-0">
+          {filteredTasks.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">No tasks matching current filter.</div>
+          ) : filteredTasks.map((task) => (
+            <div
+              key={task.id}
+              className={cn(
+                "flex flex-col md:flex-row md:items-center px-5 py-4 transition-colors gap-3 md:gap-0 border-b border-border last:border-0",
+                isOverdue(task) ? "bg-rose-50 hover:bg-rose-100" : "hover:bg-muted/30"
+              )}
+            >
               <div className="md:w-[30%] font-semibold text-sm text-foreground truncate">{task.title}</div>
               <div className="md:w-[20%] flex items-center gap-2">
                 <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold uppercase overflow-hidden">

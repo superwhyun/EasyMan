@@ -153,7 +153,7 @@ export default function TasksPage() {
             </div>
 
             {/* Task Table */}
-            <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+            <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col min-h-0">
                 {isLoading ? (
                     <div className="flex items-center justify-center h-64">
                         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -165,10 +165,10 @@ export default function TasksPage() {
                         <p className="text-sm text-muted-foreground/60">Try adjusting your filters or search query.</p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-muted/50 border-b border-border">
+                    <div className="overflow-auto flex-1 h-full">
+                        <table className="w-full text-left border-collapse relative">
+                            <thead className="sticky top-0 z-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/50 border-b border-border shadow-sm">
+                                <tr className="">
                                     <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Task Details</th>
                                     <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Assignee</th>
                                     <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Priority</th>
@@ -178,103 +178,109 @@ export default function TasksPage() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                                {filteredTasks.map((task) => (
-                                    <tr
-                                        key={task.id}
-                                        onClick={() => handleTaskClick(task)}
-                                        className="hover:bg-muted/30 transition-colors group cursor-pointer active:scale-[0.99]"
-                                    >
-                                        <td className="px-6 py-4">
-                                            <div className="flex flex-col gap-1.5 py-1">
-                                                <span className="font-semibold text-foreground group-hover:text-primary transition-colors">{task.title}</span>
-                                                {task.description && (
-                                                    <span className="text-xs text-muted-foreground line-clamp-1">{task.description}</span>
-                                                )}
-                                                <span className="text-[10px] text-muted-foreground/50 font-mono">ID: {task.id.slice(0, 8)}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold overflow-hidden border border-border">
-                                                    {task.assignee?.avatar || task.assignee?.name?.[0] || '?'}
+                                {filteredTasks.map((task) => {
+                                    const isOverdue = task.status !== 'Completed' && task.dueDate && new Date(task.dueDate) < new Date();
+                                    return (
+                                        <tr
+                                            key={task.id}
+                                            onClick={() => handleTaskClick(task)}
+                                            className={cn(
+                                                "transition-colors group cursor-pointer active:scale-[0.99] border-b border-border last:border-0",
+                                                isOverdue ? "bg-rose-50 hover:bg-rose-100" : "hover:bg-muted/30"
+                                            )}
+                                        >
+                                            <td className="px-6 py-4">
+                                                <div className="flex flex-col gap-1.5 py-1">
+                                                    <span className="font-semibold text-foreground group-hover:text-primary transition-colors">{task.title}</span>
+                                                    {task.description && (
+                                                        <span className="text-xs text-muted-foreground line-clamp-1">{task.description}</span>
+                                                    )}
+                                                    <span className="text-[10px] text-muted-foreground/50 font-mono">ID: {task.id.slice(0, 8)}</span>
                                                 </div>
-                                                <span className="text-sm text-foreground">{task.assignee?.name || 'Unassigned'}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={cn(
-                                                "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                                task.priority === 'High' ? "bg-red-100 text-red-600" :
-                                                    task.priority === 'Medium' ? "bg-orange-100 text-orange-600" :
-                                                        "bg-blue-100 text-blue-600"
-                                            )}>
-                                                {task.priority}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex flex-col gap-2 min-w-[140px]">
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold overflow-hidden border border-border">
+                                                        {task.assignee?.avatar || task.assignee?.name?.[0] || '?'}
+                                                    </div>
+                                                    <span className="text-sm text-foreground">{task.assignee?.name || 'Unassigned'}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className={cn(
+                                                    "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                                    task.priority === 'High' ? "bg-red-100 text-red-600" :
+                                                        task.priority === 'Medium' ? "bg-orange-100 text-orange-600" :
+                                                            "bg-blue-100 text-blue-600"
+                                                )}>
+                                                    {task.priority}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex flex-col gap-2 min-w-[140px]">
+                                                    {(() => {
+                                                        const isTaskEditable = isAdmin;
+                                                        return (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (!isTaskEditable) return;
+                                                                    handleUpdateStatus(task.id, task.status);
+                                                                }}
+                                                                disabled={!isTaskEditable}
+                                                                className={cn(
+                                                                    "flex items-center gap-1.5 text-xs font-medium transition-colors w-fit",
+                                                                    isTaskEditable ? "hover:text-primary cursor-pointer" : "text-muted-foreground cursor-not-allowed opacity-60"
+                                                                )}
+                                                            >
+                                                                {task.status === 'Completed' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> :
+                                                                    task.status === 'Overdue' ? <AlertCircle className="w-4 h-4 text-red-500" /> :
+                                                                        <Clock className="w-4 h-4 text-orange-400" />}
+                                                                {task.status}
+                                                                {isTaskEditable && <ChevronRight className="w-3 h-3 text-muted-foreground/50" />}
+                                                            </button>
+                                                        );
+                                                    })()}
+                                                    <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                                                        <div
+                                                            className={cn(
+                                                                "h-full rounded-full transition-all duration-500",
+                                                                task.status === 'Completed' ? "bg-green-500" : "bg-primary"
+                                                            )}
+                                                            style={{ width: `${task.status === 'Completed' ? 100 : task.progress}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    <Calendar className="w-4 h-4" />
+                                                    {task.dueDate ? new Date(task.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
                                                 {(() => {
                                                     const isTaskEditable = isAdmin;
-                                                    return (
+                                                    return isTaskEditable ? (
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                if (!isTaskEditable) return;
-                                                                handleUpdateStatus(task.id, task.status);
+                                                                handleDeleteTask(task.id);
                                                             }}
-                                                            disabled={!isTaskEditable}
-                                                            className={cn(
-                                                                "flex items-center gap-1.5 text-xs font-medium transition-colors w-fit",
-                                                                isTaskEditable ? "hover:text-primary cursor-pointer" : "text-muted-foreground cursor-not-allowed opacity-60"
-                                                            )}
+                                                            className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
                                                         >
-                                                            {task.status === 'Completed' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> :
-                                                                task.status === 'Overdue' ? <AlertCircle className="w-4 h-4 text-red-500" /> :
-                                                                    <Clock className="w-4 h-4 text-orange-400" />}
-                                                            {task.status}
-                                                            {isTaskEditable && <ChevronRight className="w-3 h-3 text-muted-foreground/50" />}
+                                                            <Trash2 className="w-4 h-4" />
                                                         </button>
+                                                    ) : (
+                                                        <div className="p-2 text-muted-foreground/20">
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </div>
                                                     );
                                                 })()}
-                                                <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                                                    <div
-                                                        className={cn(
-                                                            "h-full rounded-full transition-all duration-500",
-                                                            task.status === 'Completed' ? "bg-green-500" : "bg-primary"
-                                                        )}
-                                                        style={{ width: `${task.status === 'Completed' ? 100 : task.progress}%` }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                                <Calendar className="w-4 h-4" />
-                                                {task.dueDate ? new Date(task.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            {(() => {
-                                                const isTaskEditable = isAdmin;
-                                                return isTaskEditable ? (
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteTask(task.id);
-                                                        }}
-                                                        className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                ) : (
-                                                    <div className="p-2 text-muted-foreground/20">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </div>
-                                                );
-                                            })()}
-                                        </td>
-                                    </tr>
-                                ))}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -287,6 +293,7 @@ export default function TasksPage() {
                 onClose={() => setIsDetailOpen(false)}
                 task={selectedTask}
                 users={users}
+                promptTemplates={[]}
                 onUpdate={handleTaskUpdate}
                 onDelete={(taskId) => {
                     setIsDetailOpen(false);
