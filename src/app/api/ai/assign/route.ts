@@ -28,7 +28,7 @@ Return ONLY a JSON object. No markdown, no explanations.
 
 export async function POST(req: Request) {
   try {
-    const { prompt, history, attachments, action, taskData } = await req.json();
+    const { prompt, history, attachments, action, taskData, templateId } = await req.json();
 
     // 1. Handle Commit Action (Direct DB Save)
     if (action === 'commit' && taskData) {
@@ -43,7 +43,8 @@ export async function POST(req: Request) {
           priority: taskData.priority || 'Medium',
           dueDate: taskData.dueDate ? new Date(taskData.dueDate) : null,
           assignee: matchedUser ? { connect: { id: matchedUser.id } } : undefined,
-          attachments: attachments ? JSON.stringify(attachments) : null
+          attachments: attachments ? JSON.stringify(attachments) : null,
+          template: taskData.templateId ? { connect: { id: taskData.templateId } } : undefined
         }
       });
       return NextResponse.json({ success: true, task: newTask });
@@ -63,11 +64,19 @@ export async function POST(req: Request) {
     const currentTime = now.toLocaleTimeString('en-US', { hour12: false });
     const usersListStr = users.map(u => `- ${u.name} (${u.role})`).join('\n');
 
+    let templateContent = "";
+    if (templateId) {
+      const template = await prisma.promptTemplate.findUnique({ where: { id: templateId } });
+      if (template) {
+        templateContent = `\n\nSpecific Requirements/Rules for this task:\n${template.content}`;
+      }
+    }
+
     const promptTemplate = settings?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
-    const finalSystemPrompt = promptTemplate
-      .replace('{TODAY}', today)
-      .replace('{NOW}', currentTime)
-      .replace('{USERS_LIST}', usersListStr);
+    const finalSystemPrompt = (promptTemplate + templateContent)
+      .replace(/{TODAY}/g, today)
+      .replace(/{NOW}/g, currentTime)
+      .replace(/{USERS_LIST}/g, usersListStr);
 
     let conversationContext = '';
     if (history && history.length > 0) {
@@ -102,26 +111,29 @@ export async function POST(req: Request) {
       // Real API Call
       if (settings?.llmProvider === 'openai') {
         const requestBody = {
-          model: settings.llmModel || 'gpt-5.2',
-          input: `${finalSystemPrompt}\n\n${conversationContext}`,
-          text: {
-            format: {
-              type: 'json_schema',
+          model: settings.llmModel || 'gpt-4o',
+          messages: [
+            { role: 'system', content: finalSystemPrompt },
+            { role: 'user', content: conversationContext }
+          ],
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
               name: 'task_parsing_schema',
+              strict: true,
               schema: {
                 type: 'object',
                 properties: {
                   status: { type: 'string', enum: ['success', 'need_clarification'] },
-                  clarificationMessage: { type: ['string', 'null'], description: 'Question to ask if info is missing' },
+                  clarificationMessage: { type: ['string', 'null'] },
                   options: {
                     type: ['array', 'null'],
-                    items: { type: 'string' },
-                    description: 'Suggested options for the user to pick from'
+                    items: { type: 'string' }
                   },
-                  title: { type: ['string', 'null'], description: 'A concise title for the task' },
-                  description: { type: ['string', 'null'], description: 'Detailed task description' },
-                  assigneeName: { type: ['string', 'null'], description: 'The name of the person assigned' },
-                  dueDate: { type: ['string', 'null'], description: 'The due date in YYYY-MM-DD format' },
+                  title: { type: ['string', 'null'] },
+                  description: { type: ['string', 'null'] },
+                  assigneeName: { type: ['string', 'null'] },
+                  dueDate: { type: ['string', 'null'] },
                   priority: { type: 'string', enum: ['High', 'Medium', 'Low'] }
                 },
                 required: ['status', 'clarificationMessage', 'options', 'title', 'description', 'assigneeName', 'dueDate', 'priority'],
@@ -131,7 +143,7 @@ export async function POST(req: Request) {
           }
         };
 
-        const res = await fetch('https://api.openai.com/v1/responses', {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -146,7 +158,7 @@ export async function POST(req: Request) {
           return NextResponse.json({ error: data.error?.message || 'Failed to call OpenAI' }, { status: res.status });
         }
 
-        const content = data.output?.[0]?.content?.[0]?.text;
+        const content = data.choices?.[0]?.message?.content;
         aiResponse = JSON.parse(content || '{}');
 
       } else {

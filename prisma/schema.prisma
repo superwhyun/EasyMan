@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,43 +11,51 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String
-  role      String   @default("Member") // Admin, Member, etc.
-  avatar    String?  // Initial or Image URL
+  role      String   @default("Member")
+  avatar    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
   tasks     Task[]
 }
 
 model Task {
+  id              String          @id @default(uuid())
+  title           String
+  description     String?
+  status          String          @default("Pending")
+  priority        String          @default("Medium")
+  progress        Int             @default(0)
+  dueDate         DateTime?
+  attachments     String?
+  assigneeId      String?
+  chatLog         String?         @default("[]")
+  accomplishments String?         @default("")
+  templateId      String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  template        PromptTemplate? @relation(fields: [templateId], references: [id])
+  assignee        User?           @relation(fields: [assigneeId], references: [id])
+}
+
+model PromptTemplate {
   id          String   @id @default(uuid())
-  title       String
+  name        String
   description String?
-  status      String   @default("Pending") // Pending, In Progress, Completed, Overdue
-  priority    String   @default("Medium")
-  progress    Int      @default(0)
-  dueDate     DateTime?
-  attachments String?  // JSON string: { name: string, path: string, size: number }[]
-  
-  assigneeId  String?
-  assignee    User?    @relation(fields: [assigneeId], references: [id])
-  
+  content     String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  tasks       Task[]
 }
 
 model Settings {
-  id             String @id @default("global")
-  // LLM Config
-  llmProvider    String @default("openai") // openai, claude, grok, ollama
+  id             String   @id @default("global")
+  llmProvider    String   @default("openai")
   llmApiKey      String?
-  llmModel       String @default("gpt-5.2")
+  llmModel       String   @default("gpt-5.2")
   systemPrompt   String?
-  
-  // Notification Config
-  emailEnabled   Boolean @default(true)
-  emailFrequency String  @default("daily") // daily, weekly
-  deliveryTime   String  @default("09:00 AM")
-  
+  emailEnabled   Boolean  @default(true)
+  emailFrequency String   @default("daily")
+  deliveryTime   String   @default("09:00 AM")
   updatedAt      DateTime @updatedAt
+  reportPrompt   String?
 }

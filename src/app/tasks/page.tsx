@@ -16,27 +16,22 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
+import { Task, User } from '@/types';
+import { TaskDetailModal } from '@/components/dashboard/TaskDetailModal';
+import { useUser } from '@/contexts/UserContext';
 
-interface Task {
-    id: string;
-    title: string;
-    description: string | null;
-    status: string;
-    priority: string;
-    progress: number;
-    dueDate: string | null;
-    assignee?: {
-        name: string;
-        avatar?: string | null;
-    };
-}
 
 export default function TasksPage() {
     const { showToast, ToastComponent } = useToast();
+    const { currentUser } = useUser();
+    const isAdmin = currentUser?.role === 'Admin';
     const [tasks, setTasks] = useState<Task[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('All');
+    const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+    const [isDetailOpen, setIsDetailOpen] = useState(false);
+    const [users, setUsers] = useState<User[]>([]);
 
     const fetchTasks = async () => {
         setIsLoading(true);
@@ -52,8 +47,18 @@ export default function TasksPage() {
         }
     };
 
+    const fetchUsers = async () => {
+        try {
+            const res = await fetch('/api/users');
+            if (res.ok) setUsers(await res.json());
+        } catch (error) {
+            console.error("Failed to fetch users");
+        }
+    };
+
     useEffect(() => {
         fetchTasks();
+        fetchUsers();
     }, []);
 
     const handleUpdateStatus = async (taskId: string, currentStatus: string) => {
@@ -92,6 +97,16 @@ export default function TasksPage() {
         } catch (error) {
             showToast('Failed to delete task.', 'error');
         }
+    };
+
+    const handleTaskClick = (task: Task) => {
+        setSelectedTask(task);
+        setIsDetailOpen(true);
+    };
+
+    const handleTaskUpdate = (updatedTask: Task) => {
+        setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+        setSelectedTask(updatedTask);
     };
 
     const filteredTasks = tasks.filter(task => {
@@ -164,7 +179,11 @@ export default function TasksPage() {
                             </thead>
                             <tbody className="divide-y divide-border">
                                 {filteredTasks.map((task) => (
-                                    <tr key={task.id} className="hover:bg-muted/30 transition-colors group">
+                                    <tr
+                                        key={task.id}
+                                        onClick={() => handleTaskClick(task)}
+                                        className="hover:bg-muted/30 transition-colors group cursor-pointer active:scale-[0.99]"
+                                    >
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col gap-1.5 py-1">
                                                 <span className="font-semibold text-foreground group-hover:text-primary transition-colors">{task.title}</span>
@@ -194,16 +213,29 @@ export default function TasksPage() {
                                         </td>
                                         <td className="px-6 py-4">
                                             <div className="flex flex-col gap-2 min-w-[140px]">
-                                                <button
-                                                    onClick={() => handleUpdateStatus(task.id, task.status)}
-                                                    className="flex items-center gap-1.5 text-xs font-medium hover:text-primary transition-colors cursor-pointer w-fit"
-                                                >
-                                                    {task.status === 'Completed' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> :
-                                                        task.status === 'Overdue' ? <AlertCircle className="w-4 h-4 text-red-500" /> :
-                                                            <Clock className="w-4 h-4 text-orange-400" />}
-                                                    {task.status}
-                                                    <ChevronRight className="w-3 h-3 text-muted-foreground/50" />
-                                                </button>
+                                                {(() => {
+                                                    const isTaskEditable = isAdmin;
+                                                    return (
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (!isTaskEditable) return;
+                                                                handleUpdateStatus(task.id, task.status);
+                                                            }}
+                                                            disabled={!isTaskEditable}
+                                                            className={cn(
+                                                                "flex items-center gap-1.5 text-xs font-medium transition-colors w-fit",
+                                                                isTaskEditable ? "hover:text-primary cursor-pointer" : "text-muted-foreground cursor-not-allowed opacity-60"
+                                                            )}
+                                                        >
+                                                            {task.status === 'Completed' ? <CheckCircle2 className="w-4 h-4 text-green-500" /> :
+                                                                task.status === 'Overdue' ? <AlertCircle className="w-4 h-4 text-red-500" /> :
+                                                                    <Clock className="w-4 h-4 text-orange-400" />}
+                                                            {task.status}
+                                                            {isTaskEditable && <ChevronRight className="w-3 h-3 text-muted-foreground/50" />}
+                                                        </button>
+                                                    );
+                                                })()}
                                                 <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
                                                     <div
                                                         className={cn(
@@ -222,12 +254,24 @@ export default function TasksPage() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <button
-                                                onClick={() => handleDeleteTask(task.id)}
-                                                className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            {(() => {
+                                                const isTaskEditable = isAdmin;
+                                                return isTaskEditable ? (
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteTask(task.id);
+                                                        }}
+                                                        className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                ) : (
+                                                    <div className="p-2 text-muted-foreground/20">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </div>
+                                                );
+                                            })()}
                                         </td>
                                     </tr>
                                 ))}
@@ -237,6 +281,18 @@ export default function TasksPage() {
                 )}
             </div>
             {ToastComponent}
+
+            <TaskDetailModal
+                isOpen={isDetailOpen}
+                onClose={() => setIsDetailOpen(false)}
+                task={selectedTask}
+                users={users}
+                onUpdate={handleTaskUpdate}
+                onDelete={(taskId) => {
+                    setIsDetailOpen(false);
+                    handleDeleteTask(taskId);
+                }}
+            />
         </div>
     );
 }

@@ -9,16 +9,24 @@ export async function PATCH(
         const { id } = await params;
         const data = await req.json();
 
+        const updateData: any = {
+            status: data.status,
+            progress: data.progress,
+            priority: data.priority,
+            title: data.title,
+            description: data.description,
+            dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
+            assigneeId: data.assigneeId,
+            accomplishments: data.accomplishments,
+            attachments: data.attachments ? JSON.stringify(data.attachments) : undefined,
+        };
+
         const updatedTask = await prisma.task.update({
             where: { id },
-            data: {
-                status: data.status,
-                progress: data.progress,
-                priority: data.priority,
-                title: data.title,
-                description: data.description,
-                dueDate: data.dueDate ? new Date(data.dueDate) : undefined,
-            },
+            data: updateData,
+            include: {
+                assignee: true
+            }
         });
 
         return NextResponse.json({ success: true, task: updatedTask });

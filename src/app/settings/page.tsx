@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Loader2, CheckCircle } from 'lucide-react';
+import { Loader2, CheckCircle, Save } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 
 const providers = [
@@ -14,12 +14,20 @@ const providers = [
 
 export default function SettingsPage() {
   const { showToast, ToastComponent } = useToast();
+
+  // LLM State
   const [selectedProvider, setSelectedProvider] = useState('openai');
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState('gpt-5.2');
-  const [systemPrompt, setSystemPrompt] = useState('');
 
-  // Notification Settings
+  // Prompts State
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [reportPrompt, setReportPrompt] = useState('');
+  const [activePromptTab, setActivePromptTab] = useState<'task' | 'progress' | 'templates'>('task');
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+
+  // Notification State
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [frequency, setFrequency] = useState('daily');
   const [deliveryTime, setDeliveryTime] = useState('09:00 AM');
@@ -27,29 +35,86 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Load Settings
+  // Default Prompt Constants (Backup)
+  const DEFAULT_SYSTEM_PROMPT = `You are a smart task manager assistant.
+Today is {TODAY}, current time is {NOW}.
+Here is the team member list:
+{USERS_LIST}
+
+Your goal is to parse the user's natural language request into a structured task object.
+Extract title, description, assigneeName, dueDate, and priority.
+Return ONLY JSON.`;
+
+  const DEFAULT_REPORT_PROMPT = `You are a Task Assistant acting as a **Supportive Secretary**.
+
+Today is {TODAY}, current time is {NOW}.
+
+Current Task Context:
+- Title: {TITLE}
+- Description: {DESCRIPTION} (This is the original Instruction)
+- Status: {STATUS}
+- Progress: {PROGRESS}%
+- Assignee: {ASSIGNEE}
+
+Existing Accomplishments:
+{EXISTING_ACCOMPLISHMENTS}
+
+Your Guidelines:
+1. **Checklist Verification (Trust Mode)**:
+   - Your goal is to ensure all items listed in the **Original Instruction ({DESCRIPTION})** are accounted for in the **Accumulated Accomplishments ({EXISTING_ACCOMPLISHMENTS})** or the current user input.
+   - **Trust Rule**: You MUST trust the worker's report. If they say a specific sub-task is done, consider it done. Do NOT audit the quality or details.
+   - **Progress 100% Rule**: Set "progressUpdate": 100 and "statusUpdate": "Completed" ONLY if every item/requirement in the instruction has been mentioned as completed in the logs.
+   - If some items are still missing from the checklist, set progress realistically (e.g., 80% or 90%) and kindly mention which instruction items are still pendings in 'summarizedReport'.
+
+2. **Concise Appending**:
+   - Transform user's update into **EXACTLY ONE concise professional sentence** in Korean.
+   - Format: "[{TODAY}] (사용자가 보고한 구체적인 완료 내용)"
+   - Append this to the END of {EXISTING_ACCOMPLISHMENTS} and return the FULL string in the 'accomplishments' field.
+
+3. **Response Policy**:
+   - **Language**: ALWAYS speak in Korean in 'summarizedReport' and for the newly appended entry.
+   - **Tone**: Be warm, supportive, and act as a reliable secretary who takes care of the recording.
+
+Structured Response Format:
+{
+  "status": "success",
+  "progressUpdate": number (0-100),
+  "statusUpdate": "In Progress" | "Completed",
+  "accomplishments": "Full cumulative accomplishments string...",
+  "summarizedReport": "작업자에게 전달하는 조언 및 체크리스트 확인 결과 (Korean)"
+}`;
+
+  // Initialize
   useEffect(() => {
-    const fetchSettings = async () => {
+    const loadAll = async () => {
       try {
-        const res = await fetch('/api/settings');
-        if (res.ok) {
-          const data = await res.json();
+        const [settingsRes, promptsRes] = await Promise.all([
+          fetch('/api/settings'),
+          fetch('/api/prompts')
+        ]);
+
+        if (settingsRes.ok) {
+          const data = await settingsRes.json();
           setSelectedProvider(data.llmProvider || 'openai');
           setApiKey(data.llmApiKey || '');
           setModelName(data.llmModel || 'gpt-5.2');
-          setSystemPrompt(data.systemPrompt || '');
+          setSystemPrompt(data.systemPrompt || DEFAULT_SYSTEM_PROMPT);
+          setReportPrompt(data.reportPrompt || DEFAULT_REPORT_PROMPT);
           setEmailEnabled(data.emailEnabled ?? true);
           setFrequency(data.emailFrequency || 'daily');
           setDeliveryTime(data.deliveryTime || '09:00 AM');
         }
-      } catch (error) {
-        console.error("Failed to fetch settings:", error);
+
+        if (promptsRes.ok) {
+          setTemplates(await promptsRes.json());
+        }
+      } catch (err) {
+        console.error("Load error:", err);
       } finally {
         setIsLoading(false);
       }
     };
-
-    fetchSettings();
+    loadAll();
   }, []);
 
   const handleProviderSelect = (id: string, defaultModel: string) => {
@@ -58,7 +123,6 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
-    // Validation
     if (selectedProvider !== 'ollama' && !apiKey.trim()) {
       showToast('API Key is required for cloud providers.', 'error');
       return;
@@ -74,201 +138,279 @@ export default function SettingsPage() {
           llmApiKey: apiKey,
           llmModel: modelName,
           systemPrompt,
+          reportPrompt,
           emailEnabled,
           emailFrequency: frequency,
           deliveryTime,
         }),
       });
 
+      const text = await res.text();
       if (res.ok) {
         showToast('Settings saved successfully!', 'success');
       } else {
-        showToast('Failed to save settings.', 'error');
+        let errorMsg = 'Failed to save settings.';
+        try {
+          const data = JSON.parse(text);
+          errorMsg = data.error || errorMsg;
+        } catch (e) {
+          errorMsg = `Server error (${res.status}): ${text.slice(0, 50)}`;
+        }
+        showToast(errorMsg, 'error');
       }
-    } catch (error) {
-      showToast('Connection error occurred.', 'error');
+    } catch (err) {
+      showToast('Network error occurred.', 'error');
     } finally {
       setIsSaving(false);
     }
   };
 
+  const handleSaveTemplate = async () => {
+    if (!editingTemplate.name || !editingTemplate.content) {
+      showToast('Name and content are required.', 'error');
+      return;
+    }
+    try {
+      const url = editingTemplate.id ? `/api/prompts/${editingTemplate.id}` : '/api/prompts';
+      const method = editingTemplate.id ? 'PATCH' : 'POST';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingTemplate),
+      });
+      if (res.ok) {
+        showToast('Template saved!', 'success');
+        setEditingTemplate(null);
+        const refresh = await fetch('/api/prompts');
+        if (refresh.ok) setTemplates(await refresh.json());
+      } else {
+        showToast('Failed to save template.', 'error');
+      }
+    } catch (err) {
+      showToast('Error saving template.', 'error');
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    if (!confirm('Delete this template?')) return;
+    try {
+      const res = await fetch(`/api/prompts/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Template deleted!', 'success');
+        setTemplates(templates.filter(t => t.id !== id));
+      }
+    } catch (err) {
+      showToast('Delete failed.', 'error');
+    }
+  };
+
   if (isLoading) {
     return (
-      <div className="flex flex-col h-full items-center justify-center">
-        <Loader2 className="w-10 h-10 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">Loading settings...</p>
+      <div className="flex flex-col h-full bg-background items-center justify-center">
+        <Loader2 className="w-12 h-12 animate-spin text-primary" />
+        <p className="mt-4 text-muted-foreground animate-pulse">Initializing settings...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full p-8 gap-8 max-w-5xl mx-auto w-full">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-foreground">Settings</h1>
-      </div>
+    <div className="flex flex-col h-full bg-background p-8 gap-10 max-w-5xl mx-auto w-full pb-32">
+      <header className="flex items-center justify-between">
+        <h1 className="text-3xl font-black text-foreground tracking-tighter">Settings</h1>
+      </header>
 
-      {/* LLM Configuration */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold text-foreground">LLM Configuration</h2>
-
-        {/* Provider Cards */}
+      {/* LLM Section */}
+      <section className="space-y-6">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <div className="w-1 h-5 bg-primary rounded-full" />
+          LLM Configuration
+        </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          {providers.map((provider) => {
-            const isSelected = selectedProvider === provider.id;
+          {providers.map((p) => {
+            const active = selectedProvider === p.id;
             return (
-              <div
-                key={provider.id}
-                onClick={() => handleProviderSelect(provider.id, provider.defaultModel)}
+              <button
+                key={p.id}
+                onClick={() => handleProviderSelect(p.id, p.defaultModel)}
                 className={cn(
-                  "relative p-5 rounded-xl border flex flex-col gap-2 cursor-pointer transition-all hover:shadow-md",
-                  isSelected
-                    ? "bg-card border-primary ring-1 ring-primary"
-                    : "bg-card border-border hover:border-primary/50"
+                  "p-5 rounded-2xl border text-left transition-all hover:shadow-lg",
+                  active ? "bg-card border-primary ring-2 ring-primary/20" : "bg-card border-border"
                 )}
               >
-                {/* Radio Button */}
-                <div className={cn(
-                  "w-5 h-5 rounded-full border flex items-center justify-center mb-1",
-                  isSelected ? "border-primary border-[6px]" : "border-border border"
-                )} />
-
-                <span className="text-base font-semibold text-foreground">{provider.name}</span>
-                <span className="text-xs text-muted-foreground">{provider.desc}</span>
-              </div>
+                <div className={cn("w-4 h-4 rounded-full border mb-3", active ? "border-primary border-[5px]" : "border-border")} />
+                <div className="font-bold text-foreground">{p.name}</div>
+                <div className="text-[10px] text-muted-foreground">{p.desc}</div>
+              </button>
             );
           })}
         </div>
-
-        {/* Configuration Form */}
-        <div className="flex flex-col gap-6 max-w-xl mt-2 bg-card border border-border rounded-xl p-6 shadow-sm">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">API Key / Endpoint URL</label>
+        <div className="bg-card border border-border rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6 shadow-sm">
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-muted-foreground uppercase">API Key / URL</label>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-... or http://localhost:11434"
-              className="w-full h-11 px-4 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-mono"
+              className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 font-mono text-sm"
+              placeholder="sk-..."
             />
           </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Model Name</label>
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-muted-foreground uppercase">Model</label>
             <input
               type="text"
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              className="w-full h-11 px-4 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-foreground">System Prompt</label>
-              <span className="text-[10px] text-muted-foreground">Supports {'{TODAY}'}, {'{NOW}'}, {'{USERS_LIST}'}</span>
-            </div>
-            <textarea
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="If empty, the default assistant prompt will be used."
-              className="w-full h-32 px-4 py-3 rounded-lg border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all resize-none text-sm"
+              className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 text-sm font-bold"
             />
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Notification Configuration */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-xl font-semibold text-foreground">Notification Configuration</h2>
-
-        <div className="max-w-xl bg-card rounded-xl border border-border p-6 shadow-sm flex flex-col gap-6">
-          {/* Enable Toggle */}
+      {/* Notifications Section */}
+      <section className="space-y-6">
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <div className="w-1 h-5 bg-primary rounded-full" />
+          Notifications
+        </h2>
+        <div className="max-w-xl bg-card border border-border rounded-2xl p-8 space-y-8 shadow-sm">
           <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-1">
-              <span className="text-base font-semibold text-foreground">Enable Email Notifications</span>
-              <span className="text-xs text-muted-foreground">Send daily/weekly task summaries to assignees</span>
+            <div>
+              <div className="font-bold text-foreground">Email Notifications</div>
+              <div className="text-xs text-muted-foreground italic">Summaries for daily/weekly tasks</div>
             </div>
             <button
               onClick={() => setEmailEnabled(!emailEnabled)}
-              className={cn(
-                "w-11 h-6 rounded-full p-0.5 transition-colors duration-300 ease-in-out focus:outline-none",
-                emailEnabled ? "bg-primary" : "bg-input"
-              )}
+              className={cn("w-12 h-6 rounded-full transition-colors flex items-center px-1", emailEnabled ? "bg-primary" : "bg-muted-foreground/30")}
             >
-              <div className={cn(
-                "w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-300 ease-in-out",
-                emailEnabled ? "translate-x-5" : "translate-x-0"
-              )} />
+              <div className={cn("w-4 h-4 bg-white rounded-full transition-transform", emailEnabled ? "translate-x-6" : "translate-x-0")} />
             </button>
           </div>
-
-          <div className="h-px w-full bg-border" />
-
-          {/* Settings */}
-          <div className="flex flex-col gap-5">
-            {/* Frequency */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Frequency</label>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <div className={cn(
-                    "w-4 h-4 rounded-full border flex items-center justify-center",
-                    frequency === 'daily' ? "border-primary border-[5px]" : "border-muted-foreground border"
-                  )} />
-                  <input
-                    type="radio"
-                    name="freq"
-                    value="daily"
-                    checked={frequency === 'daily'}
-                    onChange={() => setFrequency('daily')}
-                    className="hidden"
-                  />
-                  <span className="text-sm text-foreground">Daily</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <div className={cn(
-                    "w-4 h-4 rounded-full border flex items-center justify-center",
-                    frequency === 'weekly' ? "border-primary border-[5px]" : "border-muted-foreground border"
-                  )} />
-                  <input
-                    type="radio"
-                    name="freq"
-                    value="weekly"
-                    checked={frequency === 'weekly'}
-                    onChange={() => setFrequency('weekly')}
-                    className="hidden"
-                  />
-                  <span className="text-sm text-foreground">Weekly</span>
-                </label>
+          <div className="grid grid-cols-2 gap-8">
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-muted-foreground uppercase">Frequency</label>
+              <div className="flex gap-4">
+                {['daily', 'weekly'].map(v => (
+                  <button key={v} onClick={() => setFrequency(v)} className="flex items-center gap-2 text-sm">
+                    <div className={cn("w-3 h-3 rounded-full border", frequency === v ? "border-primary border-[4px]" : "border-border")} />
+                    <span className="capitalize">{v}</span>
+                  </button>
+                ))}
               </div>
             </div>
-
-            {/* Delivery Time */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Delivery Time</label>
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-muted-foreground uppercase">Delivery Time</label>
               <input
                 type="text"
                 value={deliveryTime}
                 onChange={(e) => setDeliveryTime(e.target.value)}
-                className="w-[150px] h-10 px-3 rounded-md border border-input bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
+                className="w-full h-10 px-3 rounded-lg border border-input text-xs"
               />
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="flex items-center gap-4 mt-2">
+      {/* Prompts Section */}
+      <section className="space-y-8">
+        <h2 className="text-2xl font-black text-foreground tracking-tight border-b border-border/50 pb-4">SYSTEM PROMPT</h2>
+        <div className="flex gap-2">
+          {(['task', 'progress', 'templates'] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => setActivePromptTab(t)}
+              className={cn("px-6 py-2 rounded-full text-xs font-black tracking-widest uppercase transition-all", activePromptTab === t ? "bg-primary text-white" : "bg-muted text-muted-foreground hover:bg-muted/80")}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-card border border-border rounded-3xl p-8 shadow-inner min-h-[500px]">
+          {activePromptTab === 'task' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="flex justify-between items-end">
+                <p className="text-xs text-muted-foreground">Prompt for converting chat into structured tasks.</p>
+                <button onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
+              </div>
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
+              />
+            </div>
+          )}
+
+          {activePromptTab === 'progress' && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="flex justify-between items-end">
+                <p className="text-xs text-muted-foreground">Prompt for AI secretary reporting logic.</p>
+                <button onClick={() => setReportPrompt(DEFAULT_REPORT_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
+              </div>
+              <textarea
+                value={reportPrompt}
+                onChange={(e) => setReportPrompt(e.target.value)}
+                className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
+              />
+            </div>
+          )}
+
+          {activePromptTab === 'templates' && (
+            <div className="space-y-6 animate-in fade-in">
+              <div className="flex justify-between items-center">
+                <p className="text-xs text-muted-foreground italic">Custom verification rules for specific task types.</p>
+                {!editingTemplate && (
+                  <button onClick={() => setEditingTemplate({ name: '', description: '', content: '' })} className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg shadow-md">+ NEW</button>
+                )}
+              </div>
+
+              {editingTemplate ? (
+                <div className="space-y-4 bg-muted/30 p-6 rounded-2xl border border-primary/20">
+                  <input value={editingTemplate.name} onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })} className="w-full h-11 px-4 rounded-xl border border-input text-sm font-bold" placeholder="Name" />
+                  <textarea value={editingTemplate.content} onChange={e => setEditingTemplate({ ...editingTemplate, content: e.target.value })} className="w-full h-32 p-4 rounded-xl border border-input text-xs" placeholder="Content" />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 text-[10px] font-bold text-muted-foreground">Cancel</button>
+                    <button onClick={handleSaveTemplate} className="px-6 py-2 bg-primary text-white text-[10px] font-bold rounded-lg uppercase tracking-widest">Save</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  {templates.map(t => (
+                    <div key={t.id} className="p-5 bg-muted/10 rounded-2xl border border-border flex justify-between items-center group">
+                      <div>
+                        <div className="font-bold text-foreground text-sm">{t.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{t.description}</div>
+                      </div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => setEditingTemplate(t)} className="text-xs font-bold text-primary">Edit</button>
+                        <button onClick={() => handleDeleteTemplate(t.id)} className="text-xs font-bold text-destructive">Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Fixed Save Bar */}
+      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
         <button
           onClick={handleSave}
           disabled={isSaving}
-          className="w-[200px] h-11 bg-primary text-primary-foreground font-bold rounded-full hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-70"
+          className="w-[300px] h-14 bg-primary text-white font-black tracking-widest uppercase rounded-full shadow-2xl hover:scale-105 transition-all flex items-center justify-center gap-3 disabled:opacity-70 active:scale-95 group"
         >
-          {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Apply Settings"}
+          {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : (
+            <>
+              <Save className="w-5 h-5 group-hover:animate-bounce" />
+              Apply Global Settings
+            </>
+          )}
         </button>
       </div>
+
       {ToastComponent}
     </div>
   );
 }
-
