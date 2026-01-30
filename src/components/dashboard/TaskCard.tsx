@@ -9,10 +9,17 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, onClick }: TaskCardProps) {
+    const isOverdue = task.status !== 'Completed' && task.dueDate && new Date(task.dueDate) < new Date();
+
     return (
         <div
             onClick={() => onClick?.(task)}
-            className="p-4 rounded-xl border border-border bg-background hover:shadow-md transition-all group cursor-pointer active:scale-[0.98]"
+            className={cn(
+                "p-4 rounded-xl border transition-all group cursor-pointer active:scale-[0.98]",
+                isOverdue
+                    ? "bg-rose-50 border-red-200 hover:shadow-red-100 hover:shadow-md"
+                    : "bg-background border-border hover:shadow-md"
+            )}
         >
             <div className="flex items-start justify-between mb-3">
                 <span className={cn(

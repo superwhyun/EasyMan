@@ -52,10 +52,15 @@ export default function ReportsPage() {
 
   // Calculate Stats
   const totalTasks = tasks.length;
+  const now = new Date();
+
+  const isOverdue = (t: Task) =>
+    t.status !== 'Completed' && t.dueDate && new Date(t.dueDate) < now;
+
   const completedTasks = tasks.filter(t => t.status === 'Completed').length;
-  const inProgressTasks = tasks.filter(t => t.status === 'In Progress').length;
-  const pendingTasks = tasks.filter(t => t.status === 'Pending').length;
-  const overdueTasks = tasks.filter(t => t.status === 'Overdue').length;
+  const inProgressTasks = tasks.filter(t => t.status === 'In Progress' && !isOverdue(t)).length;
+  const pendingTasks = tasks.filter(t => t.status === 'Pending' && !isOverdue(t)).length;
+  const overdueTasks = tasks.filter(isOverdue).length;
 
   const stats = [
     { label: 'Total Tasks', value: totalTasks, color: 'text-foreground', border: 'border-primary ring-1 ring-primary' },
@@ -73,9 +78,9 @@ export default function ReportsPage() {
       stats: {
         total: userTasks.length,
         completed: userTasks.filter(t => t.status === 'Completed').length,
-        inProgress: userTasks.filter(t => t.status === 'In Progress').length,
-        pending: userTasks.filter(t => t.status === 'Pending').length,
-        overdue: userTasks.filter(t => t.status === 'Overdue').length,
+        inProgress: userTasks.filter(t => t.status === 'In Progress' && !isOverdue(t)).length,
+        pending: userTasks.filter(t => t.status === 'Pending' && !isOverdue(t)).length,
+        overdue: userTasks.filter(t => isOverdue(t)).length,
       }
     };
   });
@@ -134,11 +139,11 @@ export default function ReportsPage() {
                 <span className={cn(
                   "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase",
                   task.status === 'Completed' ? "bg-green-100 text-green-700" :
-                    task.status === 'In Progress' ? "bg-yellow-100 text-yellow-700" :
-                      task.status === 'Overdue' ? "bg-red-100 text-red-700" :
+                    isOverdue(task) ? "bg-red-100 text-red-700" :
+                      task.status === 'In Progress' ? "bg-yellow-100 text-yellow-700" :
                         "bg-gray-100 text-gray-700"
                 )}>
-                  {task.status}
+                  {isOverdue(task) ? 'Overdue' : task.status}
                 </span>
               </div>
               <div className="md:w-[15%] text-xs text-muted-foreground">
