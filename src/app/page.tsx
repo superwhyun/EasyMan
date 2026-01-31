@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { User as UserIcon } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { User, Task, PromptTemplate } from '@/types';
 import { TaskInput } from '@/components/dashboard/TaskInput';
 import { TaskConfirmation } from '@/components/dashboard/TaskConfirmation';
 import { TaskList } from '@/components/dashboard/TaskList';
 import { TaskDetailModal } from '@/components/dashboard/TaskDetailModal';
+import { TaskDetailPanel } from '@/components/dashboard/TaskDetailPanel';
 import { useUser } from '@/contexts/UserContext';
 
 export default function Dashboard() {
@@ -338,7 +340,8 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col h-full p-8 gap-6 relative max-w-6xl mx-auto w-full">
+    <div className="flex flex-col h-full p-8 gap-6 relative max-w-7xl mx-auto w-full">
+      {/* Header */}
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-foreground">
           {isAdmin ? 'Team Dashboard' : 'My Dashboard'}
@@ -350,6 +353,7 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {/* Non-Admin Stats */}
       {!isAdmin && (
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
@@ -367,7 +371,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* AI Input Section */}
+      {/* AI Input Section - Only show for Admin OR when reporting on a task */}
       {(isAdmin || focusedTask) && (
         <TaskInput
           inputValue={inputValue}
@@ -415,26 +419,74 @@ export default function Dashboard() {
         </TaskInput>
       )}
 
-      {/* Team/Personal Tasks Section */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-foreground">
-          {isAdmin ? 'Recent Team Tasks' : 'My Tasks'}
-        </h2>
-        <TaskList
-          tasks={displayTasks}
-          isDataLoading={isDataLoading}
-          onTaskClick={handleTaskClick}
-        />
-      </div>
+      {/* Main Content Area */}
+      {isAdmin && selectedTask ? (
+        /* Admin Split View (Active Selection) */
+        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-300px)] min-h-[500px] animate-in fade-in duration-300">
+          {/* Left: Task List (Compact) */}
+          <div className="lg:w-[350px] flex flex-col gap-4 h-full overflow-hidden">
+            <div className="flex items-center justify-between px-1">
+              <button
+                onClick={() => setSelectedTask(null)}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
+              >
+                <div className="p-1 rounded-md group-hover:bg-muted">←</div>
+                Back to Grid
+              </button>
+              <div className="text-xs text-muted-foreground">{displayTasks.length} tasks</div>
+            </div>
 
-      <TaskDetailModal
-        isOpen={isDetailOpen}
-        onClose={() => setIsDetailOpen(false)}
-        task={selectedTask}
-        users={users}
-        promptTemplates={promptTemplates}
-        onUpdate={handleTaskUpdate}
-      />
+            <div className="flex-1 overflow-y-auto bg-card/50 rounded-xl border border-border/50 shadow-sm p-1">
+              <TaskList
+                tasks={displayTasks}
+                isDataLoading={isDataLoading}
+                layoutMode="list"
+                selectedTaskId={selectedTask.id}
+                onTaskClick={(task) => setSelectedTask(task)}
+              />
+            </div>
+          </div>
+
+          {/* Right: Task Details Panel */}
+          <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden h-full relative">
+            <TaskDetailPanel
+              task={selectedTask}
+              users={users}
+              promptTemplates={promptTemplates}
+              onUpdate={handleTaskUpdate}
+              onDelete={(id) => {
+                window.location.reload();
+              }}
+              onClose={() => setSelectedTask(null)}
+            />
+          </div>
+        </div>
+      ) : (
+        /* Default Grid View (Overview) */
+        <div className="flex flex-col gap-4 animate-in slide-in-from-left-4 duration-300">
+          <h2 className="text-lg font-semibold text-foreground">
+            {isAdmin ? 'Recent Team Tasks' : 'My Tasks'}
+          </h2>
+          <TaskList
+            tasks={displayTasks}
+            isDataLoading={isDataLoading}
+            onTaskClick={handleTaskClick}
+            layoutMode="grid"
+          />
+        </div>
+      )}
+
+      {/* Keep Modal for Non-Admin or Mobile fallback if needed (though we used split for admin) */}
+      {!isAdmin && (
+        <TaskDetailModal
+          isOpen={isDetailOpen}
+          onClose={() => setIsDetailOpen(false)}
+          task={selectedTask}
+          users={users}
+          promptTemplates={promptTemplates}
+          onUpdate={handleTaskUpdate}
+        />
+      )}
 
       {ToastComponent}
     </div>

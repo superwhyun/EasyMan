@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, MoreHorizontal, Mail, Shield, Loader2, X } from 'lucide-react';
+import { Plus, Search, MoreHorizontal, Mail, Shield, Loader2, X, Trash2, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 
@@ -28,6 +28,10 @@ export default function UserManagementPage() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('Member');
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  // Menu State
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -48,7 +52,7 @@ export default function UserManagementPage() {
     fetchUsers();
   }, []);
 
-  const handleAddUser = async (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newEmail.trim()) {
       showToast('Name and email are required.', 'error');
@@ -57,27 +61,72 @@ export default function UserManagementPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
+      const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users';
+      const method = editingUser ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName, email: newEmail, role: newRole }),
       });
       const data = await res.json();
 
       if (res.ok) {
-        showToast('User added successfully!', 'success');
-        setIsModalOpen(false);
-        setNewName('');
-        setNewEmail('');
+        showToast(editingUser ? 'User updated successfully!' : 'User added successfully!', 'success');
+        closeModal();
         fetchUsers();
       } else {
-        showToast(data.error || 'Failed to add user', 'error');
+        showToast(data.error || 'Failed to save user', 'error');
       }
     } catch (error) {
       showToast('Connection error.', 'error');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) return;
+
+    try {
+      const res = await fetch(`/api/users/${userId}`, { method: 'DELETE' });
+      const data = await res.json();
+
+      if (res.ok) {
+        showToast('User deleted successfully', 'success');
+        fetchUsers();
+      } else {
+        showToast(data.error || 'Failed to delete user', 'error');
+      }
+    } catch (e) {
+      showToast('Deletion failed', 'error');
+    }
+    setActiveMenuId(null);
+  };
+
+  const openAddModal = () => {
+    setEditingUser(null);
+    setNewName('');
+    setNewEmail('');
+    setNewRole('Member');
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (user: User) => {
+    setEditingUser(user);
+    setNewName(user.name);
+    setNewEmail(user.email);
+    setNewRole(user.role);
+    setIsModalOpen(true);
+    setActiveMenuId(null);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingUser(null);
+    setNewName('');
+    setNewEmail('');
+    setNewRole('Member');
   };
 
   const filteredUsers = users.filter(user =>
@@ -94,7 +143,7 @@ export default function UserManagementPage() {
           <p className="text-sm text-muted-foreground">Manage team members and permissions</p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={openAddModal}
           className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-full font-medium hover:bg-primary/90 transition-colors shadow-sm"
         >
           <Plus className="w-4 h-4" />
@@ -175,9 +224,41 @@ export default function UserManagementPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button className="p-1 hover:bg-muted rounded-md transition-colors">
-                          <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
-                        </button>
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveMenuId(activeMenuId === user.id ? null : user.id);
+                            }}
+                            className="p-1 hover:bg-muted rounded-md transition-colors"
+                          >
+                            <MoreHorizontal className="w-5 h-5 text-muted-foreground" />
+                          </button>
+
+                          {activeMenuId === user.id && (
+                            <>
+                              {/* Backdrop to close menu when clicking outside */}
+                              <div className="fixed inset-0 z-10" onClick={() => setActiveMenuId(null)} />
+
+                              <div className="absolute right-0 top-full mt-1 w-32 bg-popover text-popover-foreground rounded-lg border border-border shadow-lg z-20 flex flex-col py-1 animate-in fade-in zoom-in-95 duration-100">
+                                <button
+                                  onClick={() => openEditModal(user)}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors text-left"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteUser(user.id)}
+                                  className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 text-red-600 transition-colors text-left"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -201,16 +282,16 @@ export default function UserManagementPage() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-card w-full max-w-md rounded-2xl border border-border shadow-2xl p-6 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-foreground">Add New Team Member</h2>
+              <h2 className="text-xl font-bold text-foreground">{editingUser ? 'Edit User' : 'Add New Team Member'}</h2>
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={closeModal}
                 className="p-1 hover:bg-muted rounded-full transition-colors"
               >
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
-            <form onSubmit={handleAddUser} className="flex flex-col gap-4">
+            <form onSubmit={handleSaveUser} className="flex flex-col gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground">Full Name</label>
                 <input
@@ -252,7 +333,7 @@ export default function UserManagementPage() {
               <div className="flex items-center gap-3 mt-4">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeModal}
                   className="flex-1 h-11 rounded-lg border border-input font-medium hover:bg-muted transition-colors"
                 >
                   Cancel
@@ -262,7 +343,7 @@ export default function UserManagementPage() {
                   disabled={isSubmitting}
                   className="flex-1 h-11 rounded-lg bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                 >
-                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Register"}
+                  {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingUser ? "Update" : "Register")}
                 </button>
               </div>
             </form>

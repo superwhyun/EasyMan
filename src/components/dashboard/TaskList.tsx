@@ -1,22 +1,39 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import { Task } from '@/types';
 import { TaskCard } from './TaskCard';
 
+import { cn } from '@/lib/utils';
+
 interface TaskListProps {
     tasks: Task[];
     isDataLoading: boolean;
     onTaskClick?: (task: Task) => void;
+    layoutMode?: 'grid' | 'list';
+    selectedTaskId?: string;
 }
 
-export function TaskList({ tasks, isDataLoading, onTaskClick }: TaskListProps) {
+export function TaskList({ tasks, isDataLoading, onTaskClick, layoutMode = 'grid', selectedTaskId }: TaskListProps) {
+    const selectedTaskRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (layoutMode === 'list' && selectedTaskId && selectedTaskRef.current) {
+            selectedTaskRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, [layoutMode, selectedTaskId]);
+
     return (
-        <div className="flex flex-col flex-1 bg-card rounded-xl border border-border shadow-sm p-6 gap-4 z-0 overflow-hidden">
-            <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-foreground">Recent Team Tasks</h2>
-                <Link href="/tasks" className="text-sm font-medium text-primary hover:underline">View All</Link>
-            </div>
+        <div className={cn(
+            "flex flex-col flex-1 bg-card rounded-xl border border-border shadow-sm gap-4 z-0 overflow-hidden",
+            layoutMode === 'grid' ? "p-6" : "p-0 border-0 shadow-none bg-transparent"
+        )}>
+            {layoutMode === 'grid' && (
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold text-foreground">Recent Team Tasks</h2>
+                    <Link href="/tasks" className="text-sm font-medium text-primary hover:underline">View All</Link>
+                </div>
+            )}
 
             <div className="flex-1 overflow-y-auto">
                 {isDataLoading ? (
@@ -31,9 +48,21 @@ export function TaskList({ tasks, isDataLoading, onTaskClick }: TaskListProps) {
                         </div>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div className={cn(
+                        layoutMode === 'grid'
+                            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+                            : "flex flex-col gap-2 p-1"
+                    )}>
                         {tasks.map(task => (
-                            <TaskCard key={task.id} task={task} onClick={onTaskClick} />
+                            <div
+                                key={task.id}
+                                ref={selectedTaskId === task.id ? selectedTaskRef : null}
+                                className={cn(
+                                    layoutMode === 'list' && selectedTaskId === task.id && "ring-2 ring-primary rounded-xl"
+                                )}
+                            >
+                                <TaskCard task={task} onClick={onTaskClick} />
+                            </div>
                         ))}
                     </div>
                 )}
