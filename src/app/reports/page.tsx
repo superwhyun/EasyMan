@@ -2,46 +2,42 @@
 
 import React, { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useToast } from '@/components/ui/Toast';
+import { Task, User, PromptTemplate } from '@/types';
+import { TaskList } from '@/components/dashboard/TaskList';
+import { TaskDetailPanel } from '@/components/dashboard/TaskDetailPanel';
 
-interface User {
-  id: string;
-  name: string;
-  role: string;
-  avatar?: string | null;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  status: string;
-  priority: string;
-  progress: number;
-  dueDate: string | null;
-  assigneeId?: string | null;
-  assignee?: {
-    name: string;
-    avatar?: string | null;
-  };
-}
+// Types moved to @/types
 
 export default function ReportsPage() {
   const { showToast, ToastComponent } = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const taskIdParam = searchParams.get('task');
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [prompts, setPrompts] = useState<PromptTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<'all' | 'Completed' | 'In Progress' | 'Pending' | 'Overdue'>('all');
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [tasksRes, usersRes] = await Promise.all([
+        const [tasksRes, usersRes, promptsRes] = await Promise.all([
           fetch('/api/tasks'),
-          fetch('/api/users')
+          fetch('/api/users'),
+          fetch('/api/prompts')
         ]);
-        if (tasksRes.ok) setTasks(await tasksRes.json());
+        if (tasksRes.ok) {
+          const fetchedTasks = await tasksRes.json();
+          setTasks(fetchedTasks);
+        }
         if (usersRes.ok) setUsers(await usersRes.json());
+        if (promptsRes.ok) setPrompts(await promptsRes.json());
       } catch (error) {
         showToast("Failed to fetch reports data.", 'error');
       } finally {
@@ -50,6 +46,25 @@ export default function ReportsPage() {
     };
     fetchData();
   }, []);
+
+  // Sync selectedTask with URL param
+  useEffect(() => {
+    if (taskIdParam) {
+      const task = tasks.find(t => t.id === taskIdParam);
+      if (task) setSelectedTask(task);
+    } else {
+      setSelectedTask(null);
+    }
+  }, [taskIdParam, tasks]);
+
+  const handleTaskClick = (task: Task) => {
+    router.push(`/reports?task=${task.id}`);
+  };
+
+  const handleTaskUpdate = (updatedTask: Task) => {
+    setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+    setSelectedTask(updatedTask);
+  };
 
   // Calculate Stats
   const totalTasks = tasks.length;
@@ -127,74 +142,59 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {/* Task List Table */}
-      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
-        <div className="px-5 py-4 border-b border-border flex justify-between items-center">
-          <h2 className="text-sm font-bold text-foreground">
-            Recent Task Breakdown {activeFilter !== 'all' && <span className="font-normal text-muted-foreground ml-1">- {activeFilter}</span>}
-          </h2>
-          <span className="text-xs text-muted-foreground">Showing {filteredTasks.length} tasks</span>
-        </div>
-        {/* Table Header */}
-        <div className="hidden md:flex items-center px-5 py-3 bg-muted/50 border-b border-border text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-          <div className="w-[30%]">TASK</div>
-          <div className="w-[20%]">ASSIGNEE</div>
-          <div className="w-[15%]">STATUS</div>
-          <div className="w-[15%]">DUE DATE</div>
-          <div className="flex-1">PROGRESS</div>
-        </div>
-
-        {/* Table Rows */}
-        <div className="divide-y divide-border overflow-y-auto max-h-[400px]">
-          {filteredTasks.length === 0 ? (
-            <div className="p-8 text-center text-muted-foreground">No tasks matching current filter.</div>
-          ) : filteredTasks.map((task) => (
-            <div
-              key={task.id}
-              className={cn(
-                "flex flex-col md:flex-row md:items-center px-5 py-4 transition-colors gap-3 md:gap-0 border-b border-border last:border-0",
-                isOverdue(task) ? "bg-rose-50 hover:bg-rose-100" : "hover:bg-muted/30"
-              )}
-            >
-              <div className="md:w-[30%] font-semibold text-sm text-foreground truncate">{task.title}</div>
-              <div className="md:w-[20%] flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center text-[10px] font-bold uppercase overflow-hidden">
-                  {task.assignee?.avatar || task.assignee?.name?.[0] || '?'}
-                </div>
-                <span className="text-sm text-foreground truncate">{task.assignee?.name || 'Unassigned'}</span>
-              </div>
-              <div className="md:w-[15%]">
-                <span className={cn(
-                  "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase",
-                  task.status === 'Completed' ? "bg-green-100 text-green-700" :
-                    isOverdue(task) ? "bg-red-100 text-red-700" :
-                      task.status === 'In Progress' ? "bg-yellow-100 text-yellow-700" :
-                        "bg-gray-100 text-gray-700"
-                )}>
-                  {isOverdue(task) ? 'Overdue' : task.status}
-                </span>
-              </div>
-              <div className="md:w-[15%] text-xs text-muted-foreground">
-                {task.dueDate ? new Date(task.dueDate).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '-'}
-              </div>
-              <div className="flex-1 flex items-center gap-3">
-                <div className="h-1.5 w-full max-w-[120px] bg-secondary rounded-full overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all duration-500",
-                      task.status === 'Completed' ? "bg-green-500" : "bg-primary"
-                    )}
-                    style={{ width: `${task.status === 'Completed' ? 100 : task.progress}%` }}
-                  />
-                </div>
-                <span className="text-[10px] font-bold font-mono">
-                  {task.status === 'Completed' ? 100 : task.progress}%
-                </span>
-              </div>
+      {/* Task List Section */}
+      {selectedTask ? (
+        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-400px)] min-h-[500px] animate-in fade-in duration-300">
+          {/* Left: Compact List */}
+          <div className="lg:w-[350px] flex flex-col gap-4 h-full overflow-hidden">
+            <div className="flex items-center justify-between px-1">
+              <button
+                onClick={() => router.push('/reports')}
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
+              >
+                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                Back to Grid
+              </button>
+              <div className="text-xs text-muted-foreground">{filteredTasks.length} tasks</div>
             </div>
-          ))}
+            <div className="flex-1 overflow-y-auto bg-card/50 rounded-xl border border-border/50 shadow-sm p-1">
+              <TaskList
+                tasks={filteredTasks}
+                isDataLoading={isLoading}
+                layoutMode="list"
+                selectedTaskId={selectedTask.id}
+                onTaskClick={handleTaskClick}
+              />
+            </div>
+          </div>
+
+          {/* Right: Detailed Panel */}
+          <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden h-full relative">
+            <TaskDetailPanel
+              task={selectedTask}
+              users={users}
+              promptTemplates={prompts}
+              onUpdate={handleTaskUpdate}
+              onClose={() => router.push('/reports')}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col gap-4 animate-in slide-in-from-bottom-4 duration-300">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-foreground">
+              Recent Task Breakdown {activeFilter !== 'all' && <span className="font-normal text-muted-foreground ml-1">- {activeFilter}</span>}
+            </h2>
+            <span className="text-xs text-muted-foreground">Showing {filteredTasks.length} tasks</span>
+          </div>
+          <TaskList
+            tasks={filteredTasks}
+            isDataLoading={isLoading}
+            onTaskClick={handleTaskClick}
+            layoutMode="grid"
+          />
+        </div>
+      )}
 
       {/* Team Members Overview */}
       <div className="flex flex-col gap-4">

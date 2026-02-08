@@ -5,12 +5,14 @@ export async function GET() {
     try {
         let settings = await prisma.settings.findUnique({
             where: { id: 'global' },
+            include: { llmConfigs: true }
         });
 
         // Initialize global settings if not exists
         if (!settings) {
             settings = await prisma.settings.create({
                 data: { id: 'global' },
+                include: { llmConfigs: true }
             });
         }
 
@@ -33,38 +35,56 @@ export async function POST(req: Request) {
 
         console.log('Saving Settings Data:', JSON.stringify(data, null, 2));
 
-        const updatedSettings = await prisma.settings.upsert({
-            where: { id: 'global' },
-            update: {
-                llmProvider: data.llmProvider || 'openai',
-                llmApiKey: data.llmApiKey || null,
-                llmModel: data.llmModel || 'gpt-5.2',
-                systemPrompt: data.systemPrompt || null,
-                reportPrompt: data.reportPrompt || null,
-                emailEnabled: data.emailEnabled ?? true,
-                emailFrequency: data.emailFrequency || 'daily',
-                deliveryTime: data.deliveryTime || '09:00 AM',
-            },
-            create: {
-                id: 'global',
-                llmProvider: data.llmProvider || 'openai',
-                llmApiKey: data.llmApiKey || null,
-                llmModel: data.llmModel || 'gpt-5.2',
-                systemPrompt: data.systemPrompt || null,
-                reportPrompt: data.reportPrompt || null,
-                emailEnabled: data.emailEnabled ?? true,
-                emailFrequency: data.emailFrequency || 'daily',
-                deliveryTime: data.deliveryTime || '09:00 AM',
-            },
+        const updatedSettings = await prisma.$transaction(async (tx) => {
+            // 1. Update Global Settings
+            const settings = await tx.settings.upsert({
+                where: { id: 'global' },
+                update: {
+                    llmProvider: data.llmProvider || 'openai',
+                    llmApiKey: data.llmApiKey || null, // Active provider's key
+                    llmModel: data.llmModel || 'gpt-5.2', // Active provider's model
+                    systemPrompt: data.systemPrompt || null,
+                    reportPrompt: data.reportPrompt || null,
+                    emailEnabled: data.emailEnabled ?? true,
+                    emailFrequency: data.emailFrequency || 'daily',
+                    deliveryTime: data.deliveryTime || '09:00 AM',
+                },
+                create: {
+                    id: 'global',
+                    llmProvider: data.llmProvider || 'openai',
+                    llmApiKey: data.llmApiKey || null,
+                    llmModel: data.llmModel || 'gpt-5.2',
+                    systemPrompt: data.systemPrompt || null,
+                    reportPrompt: data.reportPrompt || null,
+                    emailEnabled: data.emailEnabled ?? true,
+                    emailFrequency: data.emailFrequency || 'daily',
+                    deliveryTime: data.deliveryTime || '09:00 AM',
+                },
+            });
+
+            // 2. Update Provider Specific Config
+            if (data.llmProvider) {
+                await tx.lLMConfig.upsert({
+                    where: { provider: data.llmProvider },
+                    update: {
+                        apiKey: data.llmApiKey || null,
+                        model: data.llmModel || 'gpt-5.2',
+                    },
+                    create: {
+                        provider: data.llmProvider,
+                        apiKey: data.llmApiKey || null,
+                        model: data.llmModel || 'gpt-5.2',
+                        settingsId: 'global'
+                    }
+                });
+            }
+
+            return settings;
         });
 
         return NextResponse.json({ success: true, settings: updatedSettings });
     } catch (error: any) {
-        console.error('Save Settings Error Details:', {
-            message: error.message,
-            stack: error.stack,
-            code: error.code
-        });
+        console.error('Save Settings Error Details:', error);
         return NextResponse.json({ error: `Database Error: ${error.message}` }, { status: 500 });
     }
 }

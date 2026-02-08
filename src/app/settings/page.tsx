@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [selectedProvider, setSelectedProvider] = useState('openai');
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState('gpt-5.2');
+  const [llmConfigs, setLlmConfigs] = useState<{ provider: string, apiKey: string, model: string }[]>([]);
 
   // Prompts State
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -31,57 +32,99 @@ export default function SettingsPage() {
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [frequency, setFrequency] = useState('daily');
   const [deliveryTime, setDeliveryTime] = useState('09:00 AM');
+  const [activeMainTab, setActiveMainTab] = useState<'llm' | 'notification' | 'prompt'>('llm');
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   // Default Prompt Constants (Backup)
-  const DEFAULT_SYSTEM_PROMPT = `You are a smart task manager assistant.
+  const DEFAULT_SYSTEM_PROMPT = `You are an **Intelligent Task Manager Assistant** acting as a **Strategic Secretary**.
 Today is {TODAY}, current time is {NOW}.
 Here is the team member list:
 {USERS_LIST}
 
-Your goal is to parse the user's natural language request into a structured task object.
-Extract title, description, assigneeName, dueDate, and priority.
+Your goal is to parse the user's natural language request into a structured task object while being **Contextually Aware**.
+
+### Crucial Guidelines:
+1. **Severity Detection**:
+   - If the user reports a crisis or major loss, set "priority" to **"High"** and include **Immediate Response Measures** in the "description".
+
+2. **Task Extraction**:
+   - **title**: A punchy, priority-reflecting title.
+   - **description**: Detailed steps and action items.
+   - **assigneeName**: The name of the person assigned. Match EXACTLY one of the names from the provided user list. Do NOT change spelling.
+   - **dueDate**: The due date in 'YYYY-MM-DD' format.
+   - **priority**: 'High', 'Medium', or 'Low' (Default to High for critical issues).
+
+3. **Incomplete Requests**:
+   - If vague, set "status" to "need_clarification" and ask proactive questions.
+
 Return ONLY JSON.`;
 
-  const DEFAULT_REPORT_PROMPT = `You are a Task Assistant acting as a **Supportive Secretary**.
+  const DEFAULT_REPORT_PROMPT = `You are an **Intelligent Task Assistant** acting as a **Strategic Secretary**.
 
 Today is {TODAY}, current time is {NOW}.
 
 Current Task Context:
 - Title: {TITLE}
-- Description: {DESCRIPTION} (This is the original Instruction)
+- Description: {DESCRIPTION}
 - Status: {STATUS}
 - Progress: {PROGRESS}%
+- Priority: {PRIORITY}
 - Assignee: {ASSIGNEE}
+- Due Date: {DUE_DATE}
 
 Existing Accomplishments:
 {EXISTING_ACCOMPLISHMENTS}
 
 Your Guidelines:
-1. **Checklist Verification (Trust Mode)**:
-   - Your goal is to ensure all items listed in the **Original Instruction ({DESCRIPTION})** are accounted for in the **Accumulated Accomplishments ({EXISTING_ACCOMPLISHMENTS})** or the current user input.
-   - **Trust Rule**: You MUST trust the worker's report. If they say a specific sub-task is done, consider it done. Do NOT audit the quality or details.
-   - **Progress 100% Rule**: Set "progressUpdate": 100 and "statusUpdate": "Completed" ONLY if every item/requirement in the instruction has been mentioned as completed in the logs.
-   - If some items are still missing from the checklist, set progress realistically (e.g., 80% or 90%) and kindly mention which instruction items are still pendings in 'summarizedReport'.
+1. **Scenario-Based Processing (CRITICAL)**:
+   You must identify which scenario the user is reporting and respond accordingly.
 
-2. **Concise Appending**:
-   - Transform user's update into **EXACTLY ONE concise professional sentence** in Korean.
-   - Format: "[{TODAY}] (사용자가 보고한 구체적인 완료 내용)"
-   - Append this to the END of {EXISTING_ACCOMPLISHMENTS} and return the FULL string in the 'accomplishments' field.
+   **Scenario A: Task Transfer (@Mention)**
+   - Trigger: User mentions @{Name} or requests to change the person in charge.
+   - Priority: HIGHEST. Handle even if mixed with progress reports.
+   - Action: 
+     - Set 'assigneeName' to the EXACT name within brackets or the mentioned user.
+     - Add log to 'accomplishments': "[{TODAY}] (담당자 변경: {OLD_ASSIGNEE} -> @{NEW_ASSIGNEE}) - (이유/상황)"
+     - Guidance: Briefly explain the transfer in 'summarizedReport'.
 
-3. **Response Policy**:
-   - **Language**: ALWAYS speak in Korean in 'summarizedReport' and for the newly appended entry.
-   - **Tone**: Be warm, supportive, and act as a reliable secretary who takes care of the recording.
+   **Scenario B: Completion Reporting**
+   - Trigger: User implies the task is "Done" or "Completed".
+   - Action: **Instruction Verification (Non-Intrusive)**.
+     - Compare achievements against original {DESCRIPTION}.
+     - Do NOT judge work quality. Only check if required items are reported as done.
+     - If all items are accounted for: Set status to "Completed" and progress 100%.
+     - If items are missing: Gently list them in 'summarizedReport' and suggest keeping status as "In Progress".
+
+   **Scenario C: Progress Reporting**
+   - Trigger: Normal updates.
+   - Action: 
+     - Transform update into ONE concise sentence: "[{TODAY}] (상황 및 조치 내용)".
+     - Append to cumulative 'accomplishments'.
+     - Maintain persona: Detect crises and provide proactive advice in 'summarizedReport'.
+
+2. **General Policy**:
+   - **Language**: ALWAYS Korean for 'summarizedReport' and logs.
+   - **Tone**: Professional, alert, and supportive.
+   - **Readability (CRITICAL)**: Use newlines (\\n) between bullet points or numbered items in summarizedReport and accomplishments to ensure clean display.
+   - **History**: Do NOT rewrite history. Always append.
 
 Structured Response Format:
 {
   "status": "success",
+  "clarificationMessage": null,
+  "options": ["Suggested next action (Korean)", "Formal report suggestion (Korean)"],
+  "title": "{TITLE}",
+  "description": "{DESCRIPTION}",
+  "statusUpdate": "Pending" | "In Progress" | "Completed" | "Pending Approval",
   "progressUpdate": number (0-100),
-  "statusUpdate": "In Progress" | "Completed",
-  "accomplishments": "Full cumulative accomplishments string...",
-  "summarizedReport": "작업자에게 전달하는 조언 및 체크리스트 확인 결과 (Korean)"
+  "priority": "{PRIORITY}",
+  "assigneeName": "{ASSIGNEE}",
+  "dueDate": "{DUE_DATE}",
+  "accomplishments": "{EXISTING_ACCOMPLISHMENTS}\\n[{TODAY}] (요약문장)",
+  "remainingWork": "worker에게 주는 간단한 리마인더 (Korean)",
+  "summarizedReport": "1. 요약/분석, 2. (선택적) 이관 안내/지시사항 체크 결과, 3. 전략적 조언 (Korean)"
 }`;
 
   // Initialize
@@ -103,6 +146,7 @@ Structured Response Format:
           setEmailEnabled(data.emailEnabled ?? true);
           setFrequency(data.emailFrequency || 'daily');
           setDeliveryTime(data.deliveryTime || '09:00 AM');
+          setLlmConfigs(data.llmConfigs || []);
         }
 
         if (promptsRes.ok) {
@@ -117,9 +161,22 @@ Structured Response Format:
     loadAll();
   }, []);
 
-  const handleProviderSelect = (id: string, defaultModel: string) => {
+  const handleProviderSelect = (id: string, defaultModelName: string) => {
+    // Save current key/model to configs before switching (local state only)
+    setLlmConfigs(prev => {
+      const filtered = prev.filter(c => c.provider !== selectedProvider);
+      return [...filtered, { provider: selectedProvider, apiKey: apiKey, model: modelName }];
+    });
+
     setSelectedProvider(id);
-    setModelName(defaultModel);
+    const existing = llmConfigs.find(c => c.provider === id);
+    if (existing) {
+      setApiKey(existing.apiKey || '');
+      setModelName(existing.model || defaultModelName);
+    } else {
+      setApiKey('');
+      setModelName(defaultModelName);
+    }
   };
 
   const handleSave = async () => {
@@ -148,6 +205,11 @@ Structured Response Format:
       const text = await res.text();
       if (res.ok) {
         showToast('Settings saved successfully!', 'success');
+        // Update local configs state
+        setLlmConfigs(prev => {
+          const filtered = prev.filter(c => c.provider !== selectedProvider);
+          return [...filtered, { provider: selectedProvider, apiKey: apiKey, model: modelName }];
+        });
       } else {
         let errorMsg = 'Failed to save settings.';
         try {
@@ -215,184 +277,221 @@ Structured Response Format:
 
   return (
     <div className="flex flex-col h-full bg-background p-8 gap-10 max-w-5xl mx-auto w-full pb-32">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-6">
         <h1 className="text-3xl font-black text-foreground tracking-tighter">Settings</h1>
+        <div className="flex gap-4 border-b border-border/50 pb-px">
+          {(['llm', 'notification', 'prompt'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveMainTab(tab)}
+              className={cn(
+                "relative pb-4 text-sm font-bold transition-all px-2",
+                activeMainTab === tab
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab.toUpperCase()}
+              {activeMainTab === tab && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full animate-in fade-in slide-in-from-bottom-1" />
+              )}
+            </button>
+          ))}
+        </div>
       </header>
 
-      {/* LLM Section */}
-      <section className="space-y-6">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <div className="w-1 h-5 bg-primary rounded-full" />
-          LLM Configuration
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          {providers.map((p) => {
-            const active = selectedProvider === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => handleProviderSelect(p.id, p.defaultModel)}
-                className={cn(
-                  "p-5 rounded-2xl border text-left transition-all hover:shadow-lg",
-                  active ? "bg-card border-primary ring-2 ring-primary/20" : "bg-card border-border"
-                )}
-              >
-                <div className={cn("w-4 h-4 rounded-full border mb-3", active ? "border-primary border-[5px]" : "border-border")} />
-                <div className="font-bold text-foreground">{p.name}</div>
-                <div className="text-[10px] text-muted-foreground">{p.desc}</div>
-              </button>
-            );
-          })}
-        </div>
-        <div className="bg-card border border-border rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6 shadow-sm">
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground uppercase">API Key / URL</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 font-mono text-sm"
-              placeholder="sk-..."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-muted-foreground uppercase">Model</label>
-            <input
-              type="text"
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 text-sm font-bold"
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Notifications Section */}
-      <section className="space-y-6">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <div className="w-1 h-5 bg-primary rounded-full" />
-          Notifications
-        </h2>
-        <div className="max-w-xl bg-card border border-border rounded-2xl p-8 space-y-8 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-bold text-foreground">Email Notifications</div>
-              <div className="text-xs text-muted-foreground italic">Summaries for daily/weekly tasks</div>
+      <div className="min-h-[600px]">
+        {/* LLM Section */}
+        {activeMainTab === 'llm' && (
+          <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <div className="w-1 h-5 bg-primary rounded-full" />
+              LLM Configuration
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+              {providers.map((p) => {
+                const active = selectedProvider === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handleProviderSelect(p.id, p.defaultModel)}
+                    className={cn(
+                      "p-5 rounded-2xl border text-left transition-all hover:shadow-lg",
+                      active ? "bg-card border-primary ring-2 ring-primary/20" : "bg-card border-border"
+                    )}
+                  >
+                    <div className={cn("w-4 h-4 rounded-full border mb-3", active ? "border-primary border-[5px]" : "border-border")} />
+                    <div className="font-bold text-foreground">{p.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{p.desc}</div>
+                  </button>
+                );
+              })}
             </div>
-            <button
-              onClick={() => setEmailEnabled(!emailEnabled)}
-              className={cn("w-12 h-6 rounded-full transition-colors flex items-center px-1", emailEnabled ? "bg-primary" : "bg-muted-foreground/30")}
-            >
-              <div className={cn("w-4 h-4 bg-white rounded-full transition-transform", emailEnabled ? "translate-x-6" : "translate-x-0")} />
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-8">
-            <div className="space-y-3">
-              <label className="text-xs font-bold text-muted-foreground uppercase">Frequency</label>
-              <div className="flex gap-4">
-                {['daily', 'weekly'].map(v => (
-                  <button key={v} onClick={() => setFrequency(v)} className="flex items-center gap-2 text-sm">
-                    <div className={cn("w-3 h-3 rounded-full border", frequency === v ? "border-primary border-[4px]" : "border-border")} />
-                    <span className="capitalize">{v}</span>
+            <div className="bg-card border border-border rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6 shadow-sm">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase">API Key / URL</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 font-mono text-sm"
+                  placeholder="sk-..."
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase">Model</label>
+                <input
+                  type="text"
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  className="w-full h-11 px-4 rounded-xl border border-input bg-muted/20 text-sm font-bold"
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Notifications Section */}
+        {activeMainTab === 'notification' && (
+          <section className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <div className="w-1 h-5 bg-primary rounded-full" />
+              Notifications
+            </h2>
+            <div className="max-w-xl bg-card border border-border rounded-2xl p-8 space-y-8 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-foreground">Email Notifications</div>
+                  <div className="text-xs text-muted-foreground italic">Summaries for daily/weekly tasks</div>
+                </div>
+                <button
+                  onClick={() => setEmailEnabled(!emailEnabled)}
+                  className={cn("w-12 h-6 rounded-full transition-colors flex items-center px-1", emailEnabled ? "bg-primary" : "bg-muted-foreground/30")}
+                >
+                  <div className={cn("w-4 h-4 bg-white rounded-full transition-transform", emailEnabled ? "translate-x-6" : "translate-x-0")} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Frequency</label>
+                  <div className="flex gap-4">
+                    {['daily', 'weekly'].map(v => (
+                      <button key={v} onClick={() => setFrequency(v)} className="flex items-center gap-2 text-sm">
+                        <div className={cn("w-3 h-3 rounded-full border", frequency === v ? "border-primary border-[4px]" : "border-border")} />
+                        <span className="capitalize">{v}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-muted-foreground uppercase">Delivery Time</label>
+                  <input
+                    type="text"
+                    value={deliveryTime}
+                    onChange={(e) => setDeliveryTime(e.target.value)}
+                    className="w-full h-10 px-3 rounded-lg border border-input text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Prompts Section */}
+        {activeMainTab === 'prompt' && (
+          <section className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex flex-col gap-6">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <div className="w-1 h-5 bg-primary rounded-full" />
+                Prompt Templates
+              </h2>
+              <div className="flex gap-2">
+                {(['task', 'progress', 'templates'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setActivePromptTab(t)}
+                    className={cn(
+                      "px-6 py-2 rounded-full text-[10px] font-black tracking-widest uppercase transition-all",
+                      activePromptTab === t
+                        ? "bg-primary text-white shadow-lg shadow-primary/20"
+                        : "bg-muted text-muted-foreground hover:bg-muted-foreground/10"
+                    )}
+                  >
+                    {t}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="space-y-3">
-              <label className="text-xs font-bold text-muted-foreground uppercase">Delivery Time</label>
-              <input
-                type="text"
-                value={deliveryTime}
-                onChange={(e) => setDeliveryTime(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-input text-xs"
-              />
-            </div>
-          </div>
-        </div>
-      </section>
 
-      {/* Prompts Section */}
-      <section className="space-y-8">
-        <h2 className="text-2xl font-black text-foreground tracking-tight border-b border-border/50 pb-4">SYSTEM PROMPT</h2>
-        <div className="flex gap-2">
-          {(['task', 'progress', 'templates'] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setActivePromptTab(t)}
-              className={cn("px-6 py-2 rounded-full text-xs font-black tracking-widest uppercase transition-all", activePromptTab === t ? "bg-primary text-white" : "bg-muted text-muted-foreground hover:bg-muted/80")}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        <div className="bg-card border border-border rounded-3xl p-8 shadow-inner min-h-[500px]">
-          {activePromptTab === 'task' && (
-            <div className="space-y-4 animate-in fade-in">
-              <div className="flex justify-between items-end">
-                <p className="text-xs text-muted-foreground">Prompt for converting chat into structured tasks.</p>
-                <button onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
-              </div>
-              <textarea
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
-              />
-            </div>
-          )}
-
-          {activePromptTab === 'progress' && (
-            <div className="space-y-4 animate-in fade-in">
-              <div className="flex justify-between items-end">
-                <p className="text-xs text-muted-foreground">Prompt for AI secretary reporting logic.</p>
-                <button onClick={() => setReportPrompt(DEFAULT_REPORT_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
-              </div>
-              <textarea
-                value={reportPrompt}
-                onChange={(e) => setReportPrompt(e.target.value)}
-                className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
-              />
-            </div>
-          )}
-
-          {activePromptTab === 'templates' && (
-            <div className="space-y-6 animate-in fade-in">
-              <div className="flex justify-between items-center">
-                <p className="text-xs text-muted-foreground italic">Custom verification rules for specific task types.</p>
-                {!editingTemplate && (
-                  <button onClick={() => setEditingTemplate({ name: '', description: '', content: '' })} className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg shadow-md">+ NEW</button>
-                )}
-              </div>
-
-              {editingTemplate ? (
-                <div className="space-y-4 bg-muted/30 p-6 rounded-2xl border border-primary/20">
-                  <input value={editingTemplate.name} onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })} className="w-full h-11 px-4 rounded-xl border border-input text-sm font-bold" placeholder="Name" />
-                  <textarea value={editingTemplate.content} onChange={e => setEditingTemplate({ ...editingTemplate, content: e.target.value })} className="w-full h-32 p-4 rounded-xl border border-input text-xs" placeholder="Content" />
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 text-[10px] font-bold text-muted-foreground">Cancel</button>
-                    <button onClick={handleSaveTemplate} className="px-6 py-2 bg-primary text-white text-[10px] font-bold rounded-lg uppercase tracking-widest">Save</button>
+            <div className="bg-card border border-border rounded-3xl p-8 shadow-sm min-h-[500px]">
+              {activePromptTab === 'task' && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="flex justify-between items-end">
+                    <p className="text-xs text-muted-foreground">Prompt for converting chat into structured tasks.</p>
+                    <button onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
                   </div>
+                  <textarea
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
+                  />
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-3">
-                  {templates.map(t => (
-                    <div key={t.id} className="p-5 bg-muted/10 rounded-2xl border border-border flex justify-between items-center group">
-                      <div>
-                        <div className="font-bold text-foreground text-sm">{t.name}</div>
-                        <div className="text-[10px] text-muted-foreground">{t.description}</div>
-                      </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setEditingTemplate(t)} className="text-xs font-bold text-primary">Edit</button>
-                        <button onClick={() => handleDeleteTemplate(t.id)} className="text-xs font-bold text-destructive">Delete</button>
+              )}
+
+              {activePromptTab === 'progress' && (
+                <div className="space-y-4 animate-in fade-in">
+                  <div className="flex justify-between items-end">
+                    <p className="text-xs text-muted-foreground">Prompt for AI secretary reporting logic.</p>
+                    <button onClick={() => setReportPrompt(DEFAULT_REPORT_PROMPT)} className="text-[10px] font-bold text-primary hover:underline">Reset</button>
+                  </div>
+                  <textarea
+                    value={reportPrompt}
+                    onChange={(e) => setReportPrompt(e.target.value)}
+                    className="w-full h-[400px] p-6 rounded-2xl border border-input bg-muted/10 font-mono text-[11px] leading-relaxed resize-none focus:ring-4 focus:ring-primary/5 transition-all"
+                  />
+                </div>
+              )}
+
+              {activePromptTab === 'templates' && (
+                <div className="space-y-6 animate-in fade-in">
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-muted-foreground italic">Custom verification rules for specific task types.</p>
+                    {!editingTemplate && (
+                      <button onClick={() => setEditingTemplate({ name: '', description: '', content: '' })} className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg shadow-md">+ NEW</button>
+                    )}
+                  </div>
+
+                  {editingTemplate ? (
+                    <div className="space-y-4 bg-muted/30 p-6 rounded-2xl border border-primary/20">
+                      <input value={editingTemplate.name} onChange={e => setEditingTemplate({ ...editingTemplate, name: e.target.value })} className="w-full h-11 px-4 rounded-xl border border-input text-sm font-bold" placeholder="Name" />
+                      <textarea value={editingTemplate.content} onChange={e => setEditingTemplate({ ...editingTemplate, content: e.target.value })} className="w-full h-32 p-4 rounded-xl border border-input text-xs" placeholder="Content" />
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setEditingTemplate(null)} className="px-4 py-2 text-[10px] font-bold text-muted-foreground">Cancel</button>
+                        <button onClick={handleSaveTemplate} className="px-6 py-2 bg-primary text-white text-[10px] font-bold rounded-lg uppercase tracking-widest">Save</button>
                       </div>
                     </div>
-                  ))}
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      {templates.map(t => (
+                        <div key={t.id} className="p-5 bg-muted/10 rounded-2xl border border-border flex justify-between items-center group">
+                          <div>
+                            <div className="font-bold text-foreground text-sm">{t.name}</div>
+                            <div className="text-[10px] text-muted-foreground">{t.description}</div>
+                          </div>
+                          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => setEditingTemplate(t)} className="text-xs font-bold text-primary">Edit</button>
+                            <button onClick={() => handleDeleteTemplate(t.id)} className="text-xs font-bold text-destructive">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
-      </section>
+          </section>
+        )}
+      </div>
 
       {/* Fixed Save Bar */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">

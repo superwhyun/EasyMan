@@ -47,7 +47,7 @@ export function Sidebar() {
           Management
         </div>
         <nav className="space-y-1">
-          {menuItems.filter(item => !item.isAdminOnly || currentUser?.role === 'Admin').map((item) => {
+          {menuItems.filter(item => !item.isAdminOnly || currentUser?.role === 'Admin' || currentUser?.role === 'Manager').map((item) => {
             const isActive = pathname === item.href;
             return (
               <Link

@@ -4,26 +4,29 @@ import OpenAI from 'openai';
 
 // System Prompt Template
 const DEFAULT_SYSTEM_PROMPT = `
-You are a smart task manager assistant.
+You are an **Intelligent Task Manager Assistant** and a **Strategic Secretary**.
 Today is {TODAY}, current time is {NOW}.
 Here is the team member list:
 {USERS_LIST}
 
-Your goal is to parse the user's natural language request into a structured task object.
+Your goal is to parse the user's natural language request into a structured task object while being **Contextually Aware**.
 
-If the user's request is insufficient to create a task (e.g., missing what to do, or it's just a greeting), set "status" to "need_clarification" and provide a helpful question in "clarificationMessage".
-Furthermore, if there are specific candidate choices (like team member names if the assignee is ambiguous), provide them in "options".
+### Crucial Guidelines:
+1. **Severity Detection**:
+   - If the user reports a crisis, emergency, or major loss (e.g., "theft", "all items gone", "fire", "emergency repair"), you MUST set "priority" to **"High"** and include **Immediate Response Measures** in the "description".
+   - Do NOT just create a dry task. Suggest an **Escalation** pathway in the description or clarification message.
 
-Otherwise, set "status" to "success".
+2. **Task Extraction**:
+   - **title**: A punchy, priority-reflecting title (e.g., "[URGENT] Inventory Loss Investigation").
+   - **description**: Detailed steps. If it's a crisis, include "Action Items: 1. Secure area, 2. Notify Security, 3. Complete formal report."
+   - assigneeName: The name of the person assigned (string, match EXACTLY one of the names from the provided user list below. Do NOT translate or change the spelling. Do NOT include '@').
+   - dueDate: The due date in 'YYYY-MM-DD' format (calculate based on today)
+   - priority: 'High', 'Medium', or 'Low' (infer from context, default Medium). (Default to High for any detected critical issue).
 
-Extract the following fields for the task:
-- title: A concise, catchy title for the task (string)
-- description: A detailed explanation of the task (string, extract more info from the user request)
-- assigneeName: The name of the person assigned (string, try to match from the list)
-- dueDate: The due date in 'YYYY-MM-DD' format (calculate based on today)
-- priority: 'High', 'Medium', or 'Low' (infer from context, default Medium)
+3. **Incomplete Requests**:
+   - If the request is too vague, set "status" to "need_clarification" and ask proactive questions that help solve the problem (e.g., "Should I assign this to the Security Lead immediately?").
 
-Return ONLY a JSON object. No markdown, no explanations.
+Return ONLY a JSON object. No markdown.
 `;
 
 export async function POST(req: Request) {
@@ -33,7 +36,31 @@ export async function POST(req: Request) {
     // 1. Handle Commit Action (Direct DB Save)
     if (action === 'commit' && taskData) {
       const users = await prisma.user.findMany({ select: { id: true, name: true } });
-      const matchedUser = users.find(u => u.name === taskData.assigneeName);
+      const normalize = (s: string) => s.replace(/[@\-\s\.]/g, "").toLowerCase();
+
+      let rawName = taskData.assigneeName || "";
+      // Handle potential @{Name} format from LLM
+      const bracketMatch = rawName.match(/@{(.+)}/);
+      if (bracketMatch) rawName = bracketMatch[1];
+
+      const targetName = normalize(rawName);
+
+      // Try exact normalized match first
+      let matchedUser = users.find(u => normalize(u.name) === targetName);
+
+      // Substring match fallback
+      if (!matchedUser && targetName.length >= 2) {
+        matchedUser = users.find(u =>
+          normalize(u.name).includes(targetName) ||
+          targetName.includes(normalize(u.name))
+        );
+      }
+
+      console.log('Committing Task with data:', {
+        rawName,
+        targetName,
+        matchedUser: matchedUser?.name
+      });
 
       const newTask = await prisma.task.create({
         data: {
@@ -44,8 +71,8 @@ export async function POST(req: Request) {
           dueDate: taskData.dueDate ? new Date(taskData.dueDate) : null,
           assignee: matchedUser ? { connect: { id: matchedUser.id } } : undefined,
           attachments: attachments ? JSON.stringify(attachments) : null,
-          template: taskData.templateId ? { connect: { id: taskData.templateId } } : undefined
-        }
+          template: (taskData.templateId || templateId) ? { connect: { id: taskData.templateId || templateId } } : undefined
+        } as any
       });
       return NextResponse.json({ success: true, task: newTask });
     }
@@ -55,8 +82,16 @@ export async function POST(req: Request) {
     }
 
     // 2. Fetch Settings & Users
-    const settings = (await prisma.settings.findUnique({ where: { id: 'global' } })) as any;
+    const settings = (await prisma.settings.findUnique({
+      where: { id: 'global' },
+      include: { llmConfigs: true }
+    })) as any;
     const users = await prisma.user.findMany({ select: { id: true, name: true, role: true } });
+
+    // Find config for current provider
+    const currentConfig = settings?.llmConfigs?.find((c: any) => c.provider === settings?.llmProvider);
+    const effectiveApiKey = currentConfig?.apiKey || settings?.llmApiKey;
+    const effectiveModel = currentConfig?.model || settings?.llmModel;
 
     // 3. Prepare Context
     const now = new Date();
@@ -66,9 +101,9 @@ export async function POST(req: Request) {
 
     let templateContent = "";
     if (templateId) {
-      const template = await prisma.promptTemplate.findUnique({ where: { id: templateId } });
-      if (template) {
-        templateContent = `\n\nSpecific Requirements/Rules for this task:\n${template.content}`;
+      const templateRecord = await (prisma as any).promptTemplate.findUnique({ where: { id: templateId } });
+      if (templateRecord) {
+        templateContent = `\n\nSpecific Requirements/Rules for this task:\n${templateRecord.content}`;
       }
     }
 
@@ -96,7 +131,7 @@ export async function POST(req: Request) {
     let aiResponse;
 
     // 4. Call LLM
-    if (!settings?.llmApiKey && settings?.llmProvider === 'openai') {
+    if (!effectiveApiKey && settings?.llmProvider === 'openai') {
       console.warn("No API Key found. Using Mock Response.");
       const mockAssignee = users.find(u => prompt.includes(u.name.split(' ')[0])) || users[0];
       aiResponse = {
@@ -111,7 +146,7 @@ export async function POST(req: Request) {
       // Real API Call
       if (settings?.llmProvider === 'openai') {
         const requestBody = {
-          model: settings.llmModel || 'gpt-4o',
+          model: effectiveModel || 'gpt-4o',
           messages: [
             { role: 'system', content: finalSystemPrompt },
             { role: 'user', content: conversationContext }
@@ -147,7 +182,7 @@ export async function POST(req: Request) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${settings.llmApiKey || ''}`
+            'Authorization': `Bearer ${effectiveApiKey || ''}`
           },
           body: JSON.stringify(requestBody)
         });

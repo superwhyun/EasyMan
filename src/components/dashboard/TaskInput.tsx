@@ -33,6 +33,7 @@ interface TaskInputProps {
     selectedTemplateId: string | null;
     setSelectedTemplateId: (id: string | null) => void;
     isAdmin?: boolean;
+    onClearFocus?: () => void;
     children?: React.ReactNode;
 }
 
@@ -65,6 +66,7 @@ export function TaskInput({
     selectedTemplateId,
     setSelectedTemplateId,
     isAdmin,
+    onClearFocus,
     children
 }: TaskInputProps) {
 
@@ -95,16 +97,25 @@ export function TaskInput({
                             <span className="text-[10px] font-bold text-primary uppercase tracking-widest mb-0.5">Focusing on Task</span>
                             <h3 className="text-sm font-bold text-foreground">#{focusedTask.id.slice(0, 8)} - {focusedTask.title}</h3>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 text-muted-foreground">
+                            {onClearFocus && (
+                                <button
+                                    onClick={onClearFocus}
+                                    className="p-1 rounded-full hover:bg-primary/10 hover:text-primary transition-colors"
+                                    title="Close Focus Mode"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            )}
+                            <div className="h-4 w-px bg-border mx-1" />
                             <div className="flex flex-col items-end">
                                 <span className="text-[10px] text-muted-foreground uppercase font-semibold">Priority</span>
                                 <span className={cn(
-                                    "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                                    focusedTask.priority === 'High' ? "bg-red-100 text-red-600" :
-                                        focusedTask.priority === 'Medium' ? "bg-orange-100 text-orange-600" : "bg-blue-100 text-blue-600"
-                                )}>
-                                    {focusedTask.priority}
-                                </span>
+                                    "text-xs font-bold",
+                                    focusedTask.priority === 'High' ? "text-red-500" :
+                                        focusedTask.priority === 'Medium' ? "text-orange-500" :
+                                            "text-green-500"
+                                )}>{focusedTask.priority}</span>
                             </div>
                             <div className="flex flex-col items-end min-w-[80px]">
                                 <span className="text-[10px] text-muted-foreground uppercase font-semibold">Progress</span>
@@ -290,7 +301,10 @@ export function TaskInput({
                                 {filteredUsers.map(user => (
                                     <button
                                         key={user.id}
-                                        onClick={() => handleSelectUser(user)}
+                                        onMouseDown={(e) => {
+                                            e.preventDefault(); // Keep focus on input
+                                            handleSelectUser(user);
+                                        }}
                                         className="w-full flex items-center gap-3 px-4 py-2 hover:bg-muted text-left transition-colors"
                                     >
                                         <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold uppercase">

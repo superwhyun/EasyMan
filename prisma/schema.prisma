@@ -33,8 +33,8 @@ model Task {
   templateId      String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
-  template        PromptTemplate? @relation(fields: [templateId], references: [id])
   assignee        User?           @relation(fields: [assigneeId], references: [id])
+  template        PromptTemplate? @relation(fields: [templateId], references: [id])
 }
 
 model PromptTemplate {
@@ -48,14 +48,24 @@ model PromptTemplate {
 }
 
 model Settings {
-  id             String   @id @default("global")
-  llmProvider    String   @default("openai")
+  id             String      @id @default("global")
+  llmProvider    String      @default("openai")
   llmApiKey      String?
-  llmModel       String   @default("gpt-5.2")
+  llmModel       String      @default("gpt-5.2")
   systemPrompt   String?
-  emailEnabled   Boolean  @default(true)
-  emailFrequency String   @default("daily")
-  deliveryTime   String   @default("09:00 AM")
-  updatedAt      DateTime @updatedAt
+  emailEnabled   Boolean     @default(true)
+  emailFrequency String      @default("daily")
+  deliveryTime   String      @default("09:00 AM")
+  updatedAt      DateTime    @updatedAt
   reportPrompt   String?
+  llmConfigs     LLMConfig[]
+}
+
+model LLMConfig {
+  id         String   @id @default(uuid())
+  provider   String   @unique
+  apiKey     String?
+  model      String
+  settingsId String   @default("global")
+  settings   Settings @relation(fields: [settingsId], references: [id])
 }

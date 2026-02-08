@@ -21,8 +21,8 @@ export function TaskDetailPanel({ task, users, promptTemplates = [], onUpdate, o
     const [formData, setFormData] = useState<Partial<Task>>({});
     const [isSaving, setIsSaving] = useState(false);
 
-    const isAdmin = currentUser?.role === 'Admin';
-    const isEditable = isAdmin;
+    const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+    const isEditable = isAdmin || (task.assigneeId === currentUser?.id);
 
     useEffect(() => {
         if (task) {

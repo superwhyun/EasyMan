@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { User as UserIcon } from 'lucide-react';
+import { User as UserIcon, CheckSquare } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useToast } from '@/components/ui/Toast';
 import { User, Task, PromptTemplate } from '@/types';
 import { TaskInput } from '@/components/dashboard/TaskInput';
 import { TaskConfirmation } from '@/components/dashboard/TaskConfirmation';
 import { TaskList } from '@/components/dashboard/TaskList';
-import { TaskDetailModal } from '@/components/dashboard/TaskDetailModal';
 import { TaskDetailPanel } from '@/components/dashboard/TaskDetailPanel';
 import { useUser } from '@/contexts/UserContext';
 
@@ -39,9 +39,42 @@ export default function Dashboard() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   const { currentUser } = useUser();
-  const isAdmin = currentUser?.role === 'Admin';
+  const isAdmin = currentUser?.role === 'Admin' || currentUser?.role === 'Manager';
+
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const taskIdParam = searchParams.get('task');
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state with URL parameter
+  useEffect(() => {
+    if (isDataLoading) return;
+
+    if (taskIdParam) {
+      const task = tasks.find(t => t.id === taskIdParam);
+      if (task) {
+        setPendingTask(null);
+        setAiFeedback(null);
+        setInputValue('');
+        setSelectedTask(task);
+        setIsDetailOpen(true);
+        setFocusedTask(task); // All roles get focused task for reporting
+
+        const log = task.chatLog ? JSON.parse(task.chatLog) : [];
+        setChatHistory(log);
+      }
+    } else {
+      if (selectedTask || focusedTask) {
+        setSelectedTask(null);
+        setFocusedTask(null);
+        setIsDetailOpen(false);
+        setAiFeedback(null);
+        setChatHistory([]);
+        setPendingTask(null);
+      }
+    }
+  }, [taskIdParam, tasks, isDataLoading, currentUser?.id]);
 
   // Filter tasks for personal view if not admin
   const displayTasks = isAdmin
@@ -57,6 +90,7 @@ export default function Dashboard() {
   // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
+      setIsDataLoading(true);
       try {
         const [settingsRes, usersRes, tasksRes, promptsRes] = await Promise.all([
           fetch('/api/settings'),
@@ -81,7 +115,7 @@ export default function Dashboard() {
     };
 
     fetchData();
-  }, []);
+  }, [currentUser?.id]);
 
   // Handle Input Change
   const handleMention = (value: string, pos: number) => {
@@ -111,13 +145,28 @@ export default function Dashboard() {
   // Select User
   const handleSelectUser = (user: User) => {
     if (!inputRef.current) return;
-    const textBeforeCursor = inputValue.slice(0, cursorPos);
+
+    const currentCursorPos = inputRef.current.selectionStart || cursorPos;
+    const textBeforeCursor = inputValue.slice(0, currentCursorPos);
     const lastAtPos = textBeforeCursor.lastIndexOf('@');
-    const textAfterCursor = inputValue.slice(cursorPos);
-    const newText = inputValue.slice(0, lastAtPos) + `@${user.name} ` + textAfterCursor;
-    setInputValue(newText);
+
+    if (lastAtPos === -1) {
+      // Fallback if @ not found (shouldn't happen)
+      setInputValue(inputValue + ` @{${user.name}} `);
+    } else {
+      const textAfterCursor = inputValue.slice(currentCursorPos);
+      const newText = inputValue.slice(0, lastAtPos) + `@{${user.name}} ` + textAfterCursor;
+      setInputValue(newText);
+    }
+
     setShowMentionList(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    // Focus back and set cursor at the end of inserted name
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        // Since we added a space at the end, the new cursor should be at lastAtPos + name length + 2 (@ and space)
+      }
+    }, 0);
   };
 
   // Handle File Upload
@@ -161,6 +210,8 @@ export default function Dashboard() {
 
     setIsLoading(true);
     setSuggestions([]); // Clear suggestions
+    setPendingTask(null); // Clear any existing confirmation/clarification state
+    setAiFeedback(null);
     setLastPrompt(finalPrompt); // Store the prompt for potential editing
     const currentPrompt = finalPrompt;
     try {
@@ -194,10 +245,11 @@ export default function Dashboard() {
           setSuggestions(data.options || []);
           setInputValue('');
           showToast('AI needs more information', 'info');
-        } else if (data.needsConfirmation) {
+        } else if (data.needsConfirmation && !focusedTask) {
+          // Only show confirmation for NEW assignments
           setPendingTask({ ...data.taskData, templateId: selectedTemplateId });
-          setIsEditingTable(false); // Reset to view mode initially
-          setAiFeedback(focusedTask ? "Review the progress update below." : "Please review the task details below before final registration.");
+          setIsEditingTable(false);
+          setAiFeedback("Please review the task details below before final registration.");
           setChatHistory(prev => [
             ...prev,
             { role: 'user', content: currentPrompt },
@@ -223,9 +275,10 @@ export default function Dashboard() {
             setInputValue('');
             setAttachments([]);
             showToast('Progress recorded and task updated!', 'success');
-            // Don't nullify focusedTask immediately if we want to show the chat response?
-            // Actually, usually we should refresh the task data
-            if (data.task) setFocusedTask(data.task);
+            if (data.task) {
+              setFocusedTask(data.task);
+              setPendingTask(null);
+            }
           } else {
             setInputValue('');
             setAiFeedback(null);
@@ -235,7 +288,7 @@ export default function Dashboard() {
             if (focusedTask) setFocusedTask(null);
           }
 
-          const tasksRes = await fetch('/api/tasks');
+          const tasksRes = await fetch('/api/tasks', { cache: 'no-store' });
           if (tasksRes.ok) setTasks(await tasksRes.json());
         }
       } else {
@@ -245,7 +298,7 @@ export default function Dashboard() {
       showToast("Failed to connect to server.", 'error');
     } finally {
       setIsLoading(true); // Wait for tasks refresh
-      const tasksRes = await fetch('/api/tasks');
+      const tasksRes = await fetch('/api/tasks', { cache: 'no-store' });
       if (tasksRes.ok) setTasks(await tasksRes.json());
       setIsLoading(false);
     }
@@ -310,17 +363,8 @@ export default function Dashboard() {
   };
 
   const handleTaskClick = (task: Task) => {
-    if (isAdmin) {
-      setSelectedTask(task);
-      setIsDetailOpen(true);
-    } else {
-      setFocusedTask(task);
-      setPendingTask(null);
-      setAiFeedback(null);
-      // Initialize chat from task chatLog
-      const log = task.chatLog ? JSON.parse(task.chatLog) : [];
-      setChatHistory(log);
-      setInputValue('');
+    router.push(`/?task=${task.id}`);
+    if (!isAdmin) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
@@ -371,122 +415,63 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* AI Input Section - Only show for Admin OR when reporting on a task */}
-      {(isAdmin || focusedTask) && (
-        <TaskInput
-          inputValue={inputValue}
-          setInputValue={setInputValue}
-          setCursorPos={setCursorPos}
-          handleMention={handleMention}
-          handleSelectUser={handleSelectUser}
-          handleSend={handleSend}
-          handleFileUpload={handleFileUpload}
-          removeAttachment={removeAttachment}
-          isDragging={isDragging}
-          setIsDragging={setIsDragging}
-          onDrop={onDrop}
-          chatHistory={chatHistory}
-          suggestions={suggestions}
-          attachments={attachments}
-          isUploading={isUploading}
-          isLoading={isLoading}
-          isLlmReady={isLlmReady}
-          showMentionList={showMentionList}
-          filteredUsers={filteredUsers}
+      <TaskInput
+        inputValue={inputValue}
+        setInputValue={setInputValue}
+        setCursorPos={() => { }} // Not strictly required for simple input
+        handleMention={handleMention}
+        handleSelectUser={handleSelectUser}
+        handleSend={handleSend}
+        handleFileUpload={handleFileUpload}
+        removeAttachment={removeAttachment}
+        isDragging={isDragging}
+        setIsDragging={setIsDragging}
+        onDrop={onDrop}
+        chatHistory={chatHistory}
+        suggestions={suggestions}
+        attachments={attachments}
+        isUploading={isUploading}
+        isLoading={isLoading}
+        isLlmReady={isLlmReady}
+        showMentionList={showMentionList}
+        filteredUsers={filteredUsers}
+        pendingTask={pendingTask}
+        inputRef={inputRef}
+        title={focusedTask ? `Reporting Progress on "${focusedTask.title}"` : "AI Task Assignment"}
+        description={focusedTask ? "Tell the AI what you've done or mention someone to transfer this task." : undefined}
+        focusedTask={focusedTask}
+        promptTemplates={promptTemplates}
+        selectedTemplateId={selectedTemplateId}
+        setSelectedTemplateId={setSelectedTemplateId}
+        isAdmin={isAdmin}
+        onClearFocus={() => router.push('/')}
+      >
+        <TaskConfirmation
           pendingTask={pendingTask}
-          inputRef={inputRef}
-          title={focusedTask ? "AI Progress Report" : "AI Task Assignment"}
-          description={focusedTask
-            ? "Report your progress naturally, e.g., 'I finished the design part, about 60% done.'"
-            : "Type your task like \"Assign monthly report to Kim Chul-soo by next Friday\" or drag files here."}
-          focusedTask={focusedTask}
-          promptTemplates={promptTemplates}
-          selectedTemplateId={selectedTemplateId}
-          setSelectedTemplateId={setSelectedTemplateId}
-          isAdmin={isAdmin}
-        >
-          <TaskConfirmation
-            pendingTask={pendingTask}
-            isEditingTable={isEditingTable}
-            updatePendingTask={updatePendingTask}
-            handleEditTask={handleEditTask}
-            toggleTableEdit={toggleTableEdit}
-            handleConfirmTask={handleConfirmTask}
-            isLoading={isLoading}
-            users={users}
-            promptTemplates={promptTemplates}
-          />
-        </TaskInput>
-      )}
-
-      {/* Main Content Area */}
-      {isAdmin && selectedTask ? (
-        /* Admin Split View (Active Selection) */
-        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-300px)] min-h-[500px] animate-in fade-in duration-300">
-          {/* Left: Task List (Compact) */}
-          <div className="lg:w-[350px] flex flex-col gap-4 h-full overflow-hidden">
-            <div className="flex items-center justify-between px-1">
-              <button
-                onClick={() => setSelectedTask(null)}
-                className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group"
-              >
-                <div className="p-1 rounded-md group-hover:bg-muted">←</div>
-                Back to Grid
-              </button>
-              <div className="text-xs text-muted-foreground">{displayTasks.length} tasks</div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto bg-card/50 rounded-xl border border-border/50 shadow-sm p-1">
-              <TaskList
-                tasks={displayTasks}
-                isDataLoading={isDataLoading}
-                layoutMode="list"
-                selectedTaskId={selectedTask.id}
-                onTaskClick={(task) => setSelectedTask(task)}
-              />
-            </div>
-          </div>
-
-          {/* Right: Task Details Panel */}
-          <div className="flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden h-full relative">
-            <TaskDetailPanel
-              task={selectedTask}
-              users={users}
-              promptTemplates={promptTemplates}
-              onUpdate={handleTaskUpdate}
-              onDelete={(id) => {
-                window.location.reload();
-              }}
-              onClose={() => setSelectedTask(null)}
-            />
-          </div>
-        </div>
-      ) : (
-        /* Default Grid View (Overview) */
-        <div className="flex flex-col gap-4 animate-in slide-in-from-left-4 duration-300">
-          <h2 className="text-lg font-semibold text-foreground">
-            {isAdmin ? 'Recent Team Tasks' : 'My Tasks'}
-          </h2>
-          <TaskList
-            tasks={displayTasks}
-            isDataLoading={isDataLoading}
-            onTaskClick={handleTaskClick}
-            layoutMode="grid"
-          />
-        </div>
-      )}
-
-      {/* Keep Modal for Non-Admin or Mobile fallback if needed (though we used split for admin) */}
-      {!isAdmin && (
-        <TaskDetailModal
-          isOpen={isDetailOpen}
-          onClose={() => setIsDetailOpen(false)}
-          task={selectedTask}
+          isEditingTable={isEditingTable}
+          updatePendingTask={updatePendingTask}
+          handleEditTask={handleEditTask}
+          toggleTableEdit={toggleTableEdit}
+          handleConfirmTask={handleConfirmTask}
+          isLoading={isLoading}
           users={users}
           promptTemplates={promptTemplates}
-          onUpdate={handleTaskUpdate}
         />
-      )}
+      </TaskInput>
+
+      {/* Main Content Area: Always Grid View on Dashboard */}
+      <div className="flex flex-col gap-4 animate-in slide-in-from-left-4 duration-300">
+        <TaskList
+          tasks={displayTasks}
+          isDataLoading={isDataLoading}
+          onTaskClick={handleTaskClick}
+          layoutMode="grid"
+          selectedTaskId={selectedTask?.id}
+        />
+      </div>
+
+      {/* Keep Modal for Non-Admin or Mobile fallback if needed (though we used split for admin) */}
+      {/* Modal removed to use integrated work view */}
 
       {ToastComponent}
     </div>
